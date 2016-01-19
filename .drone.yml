@@ -1,0 +1,22 @@
+build:
+  image: ensime/ensime:v2.x
+  pull: true
+  environment:
+    - SONATYPE_USERNAME=$$SONATYPE_USERNAME
+    - SONATYPE_PASSWORD=$$SONATYPE_PASSWORD
+  commands:
+    - sbt ++$SCALA_VERSION clean test:compile doc ;
+      if [ $(git diff | wc -l) -ge 1 ] ; then
+        echo "Code formatting does not meet the project's standards:" ;
+        git --no-pager diff ;
+        exit 1 ;
+      fi
+    - sbt ++$SCALA_VERSION test
+    - if [ -z "$CI_PULL_REQUEST" ] ; then
+        sbt ++$SCALA_VERSION publish ;
+      fi
+
+matrix:
+  SCALA_VERSION:
+    - 2.11.7
+    - 2.10.6
