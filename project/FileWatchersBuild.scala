@@ -4,6 +4,7 @@ import Keys._
 import scalariform.formatter.preferences._
 import com.typesafe.sbt.SbtScalariform
 import SbtScalariform._
+import SonatypeSupport._
 
 object FileWatchersBuild extends Build {
   override val settings = super.settings ++ Seq(
@@ -37,7 +38,7 @@ object FileWatchersBuild extends Build {
       "-Xlint:-options", "-Xlint:-path", "-Xlint:-processing"
     ),
     javacOptions in doc ++= Seq("-source", "1.6")
-  )
+  ) ++ sonatype("ensime", "java7-file-watcher", Apache2)
 
   lazy val root = (project in file(".")).
     enablePlugins(SbtScalariform).
