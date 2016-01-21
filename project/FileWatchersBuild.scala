@@ -34,17 +34,22 @@ object FileWatchersBuild extends Build {
     // we must output JRE6 classfiles for safe ensime-server compiles
     // (even though it'll fail at runtime)
     javacOptions in (Compile, compile) ++= Seq(
-      "-source", "1.6", "-target", "1.6", "-Xlint:all", "-Werror",
+      "-source", "1.7", "-target", "1.7", "-Xlint:all", "-Werror",
       "-Xlint:-options", "-Xlint:-path", "-Xlint:-processing"
     ),
-    javacOptions in doc ++= Seq("-source", "1.6")
+    javacOptions in doc ++= Seq("-source", "1.7")
   ) ++ sonatype("ensime", "java7-file-watcher", Apache2)
 
   lazy val root = (project in file(".")).
     enablePlugins(SbtScalariform).
     settings(
       name := "java7-file-watchers",
-      ScalariformKeys.preferences := FormattingPreferences().setPreference(AlignSingleLineCaseStatements, true)
+      ScalariformKeys.preferences := FormattingPreferences().setPreference(AlignSingleLineCaseStatements, true),
+      libraryDependencies ++= Seq(
+        "org.scalatest" %% "scalatest" % "2.2.5" % "test",
+        "org.slf4j" % "slf4j-api" % "1.7.13",
+        "org.slf4j" % "slf4j-simple" % "1.7.13"
+      )
     )
 
 }
