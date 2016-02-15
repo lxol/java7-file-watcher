@@ -9,6 +9,22 @@ import java.io.File
 import java.nio.file.{Path, Paths, Files}
 import scala.concurrent.Future
 import time.{Span, Millis, Seconds}
+import java.io.IOException
+import java.nio.file.FileSystems
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.PathMatcher
+import java.nio.file.Paths
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.FileVisitor
+import java.nio.file.StandardWatchEventKinds
+import java.nio.file.WatchEvent.Kind
+import java.nio.file.WatchEvent
+import java.nio.file.WatchKey
+import java.nio.file.WatchService
+import java.nio.file.attribute.BasicFileAttributes
 
 class FileMonitorSpec extends fixture.FunSuite with ConductorFixture
   with Matchers with TempDirFixtures {
@@ -69,10 +85,12 @@ class FileMonitorSpec extends fixture.FunSuite with ConductorFixture
       @volatile var w: Waiter = null
 
       val watcher = new FileMonitor()
+      watcher.start()
       watcher.addSelector("scala")
       watcher.setRecursive(true);
+
       watcher.addWatchedDir(rootPath.toFile)
-      watcher.start()
+
       thread {
         w = new Waiter
         val listener = new FileListener {
@@ -103,10 +121,11 @@ class FileMonitorSpec extends fixture.FunSuite with ConductorFixture
         info("Create a new dir.")
         val sub: Path = Files.createTempDirectory(rootPath, "sub")
         info("Create a file in a new dir.")
+        Thread.sleep(1000)
         Files.createTempFile(sub, "new", ".scala")
-        w.await(timeout(Span(60, Seconds)), dismissals(1))
+        w.await(timeout(Span(20, Seconds)), dismissals(1))
       }
-      conductor.conduct(timeout(Span(1, Seconds)), interval(Span(1, Seconds)))
+      conductor.conduct(timeout(Span(2, Seconds)), interval(Span(2, Seconds)))
     }
   }
 
@@ -199,7 +218,25 @@ class FileMonitorSpec extends fixture.FunSuite with ConductorFixture
         info("parent dir.")
         watcher.addWatchedDir(rootPath.toFile)
         Files.delete(rootPath)
+        Thread.sleep(500)
+        //parentPath.canon.tree.reverse.foreach(_.delete())
         Files.delete(parentPath)
+        // Files.walkFileTree(parentPath, new FileVisitor[Path] {
+        //   def visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
+
+        //   def visitFile(file: Path, attrs: BasicFileAttributes) = {
+        //     Files.delete(file)
+        //     FileVisitResult.CONTINUE
+        //   }
+
+        //   def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = FileVisitResult.CONTINUE
+
+        //   def postVisitDirectory(dir: Path, exc: IOException) = {
+        //     Files.delete(dir)
+        //     FileVisitResult.CONTINUE
+        //   }
+        // })
+
         info("Remove parent dir.")
         w.await(timeout(Span(30, Seconds)), dismissals(1))
       }

@@ -92,6 +92,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
       withTestKit { implicit tk =>
         withTempDir { dir =>
           withClassWatcher(dir) { watcher =>
+            tk.ignoreMsg {
+              case msg: Changed => true
+            }
+
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
 
@@ -141,7 +145,9 @@ abstract class FileWatcherSpec extends EnsimeSpec
         try {
           withClassWatcher(dir) { watcher =>
             // would be better if this was atomic (not possible from JVM?)
-            parent.tree.reverse.foreach(_.delete())
+            dir.tree.reverse.foreach(_.delete())
+            Thread.sleep(300)
+            parent.delete()
 
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
@@ -172,6 +178,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
+              case c: Changed     => false
               case a: BaseAdded   => true
               case r: Removed     => false // foo/bar
             }
@@ -234,10 +241,13 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             waitForLinus()
 
-            parent.tree.reverse.foreach(_.delete())
+            dir.tree.reverse.foreach(_.delete())
+            Thread.sleep(300)
+            parent.delete()
 
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
+              case c: Changed     => false
               case a: BaseAdded   => true
               case r: Removed     => false
             }
@@ -284,6 +294,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
         withTempDir { dir =>
+          tk.ignoreMsg {
+            case msg: Changed => true
+          }
+
           val jar = (dir / "jar.jar")
           jar.createWithParents() shouldBe true
 
@@ -301,6 +315,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
         withTempDir { dir =>
+
           val jar = (dir / "jar.jar")
           withJarWatcher(jar) { watcher =>
             waitForLinus()
@@ -316,6 +331,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
         withTempDir { dir =>
+          tk.ignoreMsg {
+            case msg: Changed => true
+          }
+
           val jar = (dir / "jar.jar")
           jar.createWithParents() shouldBe true
 
