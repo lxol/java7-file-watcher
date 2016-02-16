@@ -135,10 +135,10 @@ public class FileMonitor implements Runnable {
     public void addWatchedDir(final File watchedDir) {
         watchedDirs.add(watchedDir);
         if (recursive) {
-            registerPath(watchedDir.toPath());
+            registerTree(watchedDir.toPath(), false);
         }
         else {
-            registerTree(watchedDir.toPath(), false);
+            registerPath(watchedDir.toPath());
         }
     }
 
@@ -276,9 +276,8 @@ public class FileMonitor implements Runnable {
                 logger.debug("unregister dir: {}", dir);
                 directories.remove(key);
                 if (directories.isEmpty()) {
-                    logger.info("there is nothing to watch");
+                    logger.info("base is removed");
                     notifyListeners(dir, ENTRY_DELETE);
-                    //break;
                 }
             }
         }

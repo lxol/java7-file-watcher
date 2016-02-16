@@ -2,8 +2,8 @@
 // Licence: http://www.gnu.org/licenses/gpl-3.0.en.html
 package org.ensime.fixture
 
-import org.ensime.vfs._
-import org.scalatest.{ BeforeAndAfterAll, Suite }
+import org.ensime.indexer._
+import org.scalatest.{BeforeAndAfterAll, Suite}
 
 trait EnsimeVFSFixture {
 
@@ -27,7 +27,7 @@ trait IsolatedEnsimeVFSFixture extends Suite with EnsimeVFSFixture {
  * a project that is cloned once for the test suite.
  */
 trait SharedEnsimeVFSFixture extends Suite
-    with EnsimeVFSFixture with BeforeAndAfterAll {
+  with EnsimeVFSFixture with BeforeAndAfterAll {
   private[fixture] implicit var _vfs: EnsimeVFS = _
 
   override def beforeAll(): Unit = {

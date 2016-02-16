@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
 import akka.testkit._
-
+import scala.language.postfixOps
 /**
  * Normally a TestKit will reuse the same actor system for all tests
  * in a suite, but sometimes isolation of the system is needed on a

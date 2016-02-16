@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 import org.scalatest._
 import org.scalatest.time._
 import org.scalatest.concurrent.Eventually
+import org.scalatest.concurrent.AbstractPatienceConfiguration
 import org.scalactic.TypeCheckedTripleEquals
 import org.slf4j.LoggerFactory
 import org.slf4j.bridge.SLF4JBridgeHandler
@@ -17,13 +18,13 @@ import scala.concurrent.duration._
  * Boilerplate remover and preferred testing style in ENSIME.
  */
 trait EnsimeSpec extends FlatSpec
-    with Matchers
-    with Inside
-    with Retries
-    with Eventually
-    with TryValues
-    with Inspectors
-    with TypeCheckedTripleEquals {
+  with Matchers
+  with Inside
+  with Retries
+  with Eventually
+  with TryValues
+  with Inspectors
+  with TypeCheckedTripleEquals {
 
   SLF4JBridgeHandler.removeHandlersForRootLogger()
   SLF4JBridgeHandler.install()
@@ -31,7 +32,7 @@ trait EnsimeSpec extends FlatSpec
 
   private val akkaTimeout: Duration = ConfigFactory.load().getDuration("akka.test.default-timeout", TimeUnit.MILLISECONDS).milliseconds
   override val spanScaleFactor: Double = ConfigFactory.load().getDouble("akka.test.timefactor")
-  implicit override val patienceConfig = PatienceConfig(
+  implicit override val patienceConfig: EnsimeSpec.this.PatienceConfig = PatienceConfig(
     timeout = scaled(akkaTimeout),
     interval = scaled(Span(5, Millis))
   )
