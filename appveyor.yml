@@ -22,11 +22,9 @@ install:
   - cmd: SET AKKA_TEST_TIMEFACTOR=10
   - cmd: mkdir .ensime_cache
 build_script:
-  - sbt clean compile test:compile it:compile
-before_test:
-  - sbt gen-ensime
+  - sbt clean compile test:compile
 test_script:
-  - sbt test it:test
+  - sbt test
 cache:
   - C:\sbt\
   - C:\Users\appveyor\.m2
