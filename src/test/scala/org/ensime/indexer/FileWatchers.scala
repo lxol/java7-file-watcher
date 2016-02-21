@@ -11,6 +11,8 @@ import java.util.regex.Pattern
 import java.util.zip.ZipFile
 import org.apache.commons.vfs2.{ _ }
 import org.apache.commons.vfs2.impl._
+import org.apache.commons.vfs2.provider.jar.JarFileSystem
+import org.apache.commons.vfs2.provider.local.LocalFileSystem
 import org.apache.commons.vfs2.provider.zip.ZipFileSystem
 import scala.Predef.{ any2stringadd => _, _ }
 import scala.collection.Set
@@ -29,10 +31,6 @@ trait Watcher {
   def shutdown(): Unit
 }
 
-/**
- * One watcher per directory because we need to restart the watcher if
- * the directory is deleted.
- */
 /**
  * One watcher per directory because we need to restart the watcher if
  * the directory is deleted.
@@ -245,6 +243,11 @@ object SourceSelector extends ExtSelector {
 
 object EnsimeVFS {
   def apply(): EnsimeVFS = {
+    // avoid classloader race conditions
+    require(classOf[LocalFileSystem] != null)
+    require(classOf[ZipFileSystem] != null)
+    require(classOf[JarFileSystem] != null)
+
     val vfsInst = new StandardFileSystemManager()
     vfsInst.init()
     vfsInst

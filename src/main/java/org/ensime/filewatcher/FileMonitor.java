@@ -78,12 +78,8 @@ public class FileMonitor implements Runnable {
     /**
      * Construct a new watcher with no listeners
      */
-    public FileMonitor() {
-        try {
-            watchService = FileSystems.getDefault().newWatchService();
-        } catch (final IOException e) {
-            throw new RuntimeException("unable to create a WatchService: ", e);
-        }
+    public FileMonitor() throws IOException {
+        watchService = FileSystems.getDefault().newWatchService();
     }
 
     /**
@@ -152,7 +148,7 @@ public class FileMonitor implements Runnable {
                                 ENTRY_DELETE);
         }  catch (final IOException e) {
             logger.error("WatchService can not register {}, {}", path, e);
-            throw new RuntimeException(e);
+            return;
         }
         directories.put(key, path);
     }
@@ -187,7 +183,6 @@ public class FileMonitor implements Runnable {
                 });
         } catch (final IOException e) {
             logger.error("unexpected registerTree error. {}", e);
-            throw new RuntimeException(e);
         }
     }
 
@@ -243,7 +238,7 @@ public class FileMonitor implements Runnable {
                 key = watchService.take();
             } catch (InterruptedException x) {
                 logger.error("unexpected WatchService take error. {}", x);
-                throw new RuntimeException(x);
+                return;
             }
 
             for (WatchEvent<?> watchEvent : key.pollEvents()) {
@@ -286,7 +281,6 @@ public class FileMonitor implements Runnable {
         }
         catch(IOException e) {
             logger.error("unexpected WatchService close error. {}", e);
-            throw new RuntimeException(e);
         }
     }
 

@@ -6,7 +6,7 @@ import com.typesafe.sbt.SbtScalariform
 import SbtScalariform._
 import SonatypeSupport._
 
-object FileWatchersBuild extends Build {
+object FileWatcherBuild extends Build {
   override val settings = super.settings ++ Seq(
     organization := "org.ensime",
     version := "1.0.0-SNAPSHOT",
@@ -15,7 +15,7 @@ object FileWatchersBuild extends Build {
 
   lazy val root = (project in file(".")).
     settings(Sensible.settings).settings(
-      name := "java7-file-watchers",
+      name := "java7-file-watcher",
       javaOptions in Test ++= Seq("-Dlogback.configurationFile=logback-test.xml"),
       libraryDependencies ++= Sensible.testLibs() ++
         Sensible.logback ++ Sensible.guava ++ Seq(

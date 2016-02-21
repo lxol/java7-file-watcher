@@ -71,6 +71,9 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+            foo.isFile() shouldBe true
+            bar.isFile() shouldBe true
+
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
 
@@ -260,6 +263,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             val nonDeterministicAdd: Fish = {
               case a: Added => true
               case c: Changed => true
+              case a: BaseAdded => false
               case r: Removed => false
             }
             tk.fishForMessage()(nonDeterministicAdd)
