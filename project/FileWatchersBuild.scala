@@ -16,7 +16,7 @@ object FileWatchersBuild extends Build {
   lazy val root = (project in file(".")).
     settings(Sensible.settings).settings(
       name := "java7-file-watchers",
-      ScalariformKeys.preferences := FormattingPreferences().setPreference(AlignSingleLineCaseStatements, true),
+      javaOptions in Test ++= Seq("-Dlogback.configurationFile=logback-test.xml"),
       libraryDependencies ++= Sensible.testLibs() ++
         Sensible.logback ++ Sensible.guava ++ Seq(
           "org.apache.commons" % "commons-vfs2" % "2.0"

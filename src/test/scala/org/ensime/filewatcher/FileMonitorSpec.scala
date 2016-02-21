@@ -1,17 +1,17 @@
 package org.ensime.filewatcher
 
 import java.io.File
-import java.nio.file.{Files, Path}
+import java.nio.file.{ Files, Path }
 import java.nio.file.Files
 import java.nio.file.Path
 import org.scalatest._
 import org.scalatest.concurrent.AsyncAssertions._
 import org.scalatest.concurrent.ConductorFixture
 import org.scalatest.fixture
-import org.scalatest.time.{Seconds, Span}
+import org.scalatest.time.{ Seconds, Span }
 
 class FileMonitorSpec extends fixture.FunSuite with ConductorFixture
-  with Matchers with TempDirFixtures {
+    with Matchers with TempDirFixtures {
 
   test("FileMonitor should detect a new file") { conductor =>
 

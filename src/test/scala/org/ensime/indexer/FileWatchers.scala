@@ -5,14 +5,14 @@ package org.ensime.indexer
 import akka.event.slf4j.SLF4JLogging
 import com.google.common.io.Files
 import file._
-import java.io.{File => JFile, _}
+import java.io.{ File => JFile, _ }
 import java.nio.charset.Charset
 import java.util.regex.Pattern
 import java.util.zip.ZipFile
-import org.apache.commons.vfs2.{_}
+import org.apache.commons.vfs2.{ _ }
 import org.apache.commons.vfs2.impl._
 import org.apache.commons.vfs2.provider.zip.ZipFileSystem
-import scala.Predef.{any2stringadd => _, _}
+import scala.Predef.{ any2stringadd => _, _ }
 import scala.collection.Set
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.implicitConversions
@@ -38,13 +38,13 @@ trait Watcher {
  * the directory is deleted.
  */
 private class Java7Watcher(
-  watched: File,
-  selector: ExtSelector,
-  recursive: Boolean,
-  listeners: Seq[FileChangeListener]
+    watched: File,
+    selector: ExtSelector,
+    recursive: Boolean,
+    listeners: Seq[FileChangeListener]
 )(
-  implicit
-  vfs: EnsimeVFS
+    implicit
+    vfs: EnsimeVFS
 ) extends Watcher {
   private val base = vfs.vfile(watched).getName.getURI
   import org.ensime.filewatcher.FileMonitor
