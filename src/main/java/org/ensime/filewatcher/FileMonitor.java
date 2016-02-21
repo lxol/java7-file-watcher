@@ -63,13 +63,13 @@ public class FileMonitor implements Runnable {
         this.recursive = newRecursive;
     }
 
-    private final Map<WatchKey, Path> directories = new HashMap<>();
+    private final Map<WatchKey, Path> directories = new HashMap<WatchKey, Path>();
 
-    private final CopyOnWriteArrayList<FileListener> listeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<FileListener> listeners = new CopyOnWriteArrayList<FileListener>();
 
-    private final CopyOnWriteArraySet<String> selectors = new CopyOnWriteArraySet<>();
+    private final CopyOnWriteArraySet<String> selectors = new CopyOnWriteArraySet<String>();
 
-    private final CopyOnWriteArrayList<File> watchedDirs = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<File> watchedDirs = new CopyOnWriteArrayList<File>();
 
     private PathMatcher pathMatcher;
 
