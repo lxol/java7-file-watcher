@@ -88,7 +88,6 @@ public class FileMonitor implements Runnable {
      * @param listener The listener to notify.
      */
     public void addListener(final FileListener listener) {
-        logger.debug("listener added");
         listeners.add(listener);
     }
 
@@ -117,8 +116,6 @@ public class FileMonitor implements Runnable {
             delim = ",";
         }
         pattern += "}";
-        logger.debug("selector added: {}", selector);
-        logger.debug("new search pattern: {}", pattern);
 
         pathMatcher = FileSystems.getDefault().getPathMatcher(pattern);
     }
@@ -139,7 +136,6 @@ public class FileMonitor implements Runnable {
     }
 
     private void registerPath(Path path)  {
-        logger.info("register {}", path);
         final WatchKey key;
         try {
             key = path.register(watchService,
@@ -165,15 +161,12 @@ public class FileMonitor implements Runnable {
             Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
                     @Override
                     public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                        logger.debug("register {}", dir);
                         registerPath(dir);
                         return FileVisitResult.CONTINUE;
                     }
                     @Override
                     public FileVisitResult visitFile(Path f, BasicFileAttributes attrs) {
-                        logger.debug("visited file: {}", f);
                         if (treatExistingAsNew) {
-                            logger.debug("treat existing file as new {}", f);
                             if (isWatched(f)) {
                                 notifyListeners(f, ENTRY_CREATE);
                             }
@@ -268,10 +261,8 @@ public class FileMonitor implements Runnable {
             boolean valid = key.reset();
             if (!valid) {
                 Path dir = directories.get(key);
-                logger.debug("unregister dir: {}", dir);
                 directories.remove(key);
                 if (directories.isEmpty()) {
-                    logger.info("base is removed");
                     notifyListeners(dir, ENTRY_DELETE);
                 }
             }
@@ -291,7 +282,6 @@ public class FileMonitor implements Runnable {
      * @param event The event.
      */
     private void notifyListeners(final Path path, final Kind<?> event) {
-        logger.debug("{} event received for {}", event, path);
         if (StandardWatchEventKinds.ENTRY_CREATE.equals(event)) {
             for (FileListener listener : listeners) {
                 listener.fileAdded(path.toFile());
