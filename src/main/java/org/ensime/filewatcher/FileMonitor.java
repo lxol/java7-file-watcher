@@ -236,7 +236,7 @@ public class FileMonitor implements Runnable {
 
             for (WatchEvent<?> watchEvent : key.pollEvents()) {
                 final Kind<?> kind = watchEvent.kind();
-                Path file = (Path)watchEvent.context();
+                final Path file = ((Path) key.watchable()).resolve((Path) watchEvent.context());
                 if (kind == OVERFLOW) {
                     for (FileListener listener : listeners) {
                         listener.onOverflow(file.toFile());
