@@ -358,7 +358,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
       }
     }
 
-  // it should "survive removal of a gradparent of a file base" taggedAs (Retryable) in
+  // it should "survive removal of a parent of a file base" taggedAs (Retryable) in
   //   withVFS { implicit vfs =>
   //     withTestKit { implicit tk =>
   //       withTempDir { dir =>
@@ -371,7 +371,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
   //           waitForLinus()
   //           log.debug("remove recursively {}", dir)
   //           dir.tree.reverse.foreach(_.delete())
-  //           tk.expectMsgType[BaseRemoved]
+  //           tk.expectMsgType[Removed]
   //           jar.createWithParents() shouldBe true
   //           waitForLinus()
   //           tk.expectMsgType[Added]

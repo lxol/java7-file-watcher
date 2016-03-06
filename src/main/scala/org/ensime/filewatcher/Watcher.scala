@@ -173,10 +173,10 @@ class FileWatcher {
         if (!continueMonitoring) break
         Try { watchService.take() } match {
           case Success(key) => {
+            processEvents(key)
             if (!key.reset) {
               maybeRecoverFromDeletion(key)
             }
-            processEvents(key)
           }
           case Failure(e) => {
             log.error("unexpected WatchService take error. {}", e)
@@ -194,12 +194,12 @@ class FileWatcher {
           val file = key.watchable.asInstanceOf[Path]
             .resolve(event.context.asInstanceOf[Path]).toFile
 
-          //log.debug(s"event: ${kind} for ${file}")
+          log.debug(s"event: ${kind} for ${file}")
 
           if (kind == ENTRY_CREATE
             && Files.isDirectory(file.toPath, LinkOption.NOFOLLOW_LINKS)
             && WatchKeyManager.hasRecursive(key)) {
-            //log.debug(s"watch a subdirectory ${file}")
+            log.debug(s"watch a subdirectory ${file}")
             watch(
               file,
               WatchKeyManager.recListeners(key)
@@ -207,12 +207,14 @@ class FileWatcher {
           }
 
           if (kind == ENTRY_CREATE) {
+            log.debug(s"maybeAdvanceProxy ${keyToFile(key)} ${file}")
             WatchKeyManager.maybeAdvanceProxy(key, file)
           }
 
-          if (kind == ENTRY_DELETE && keyToFile(key) == file) {
-            maybeRecoverFromDeletion(key)
-          }
+          // if (kind == ENTRY_DELETE && keyToFile(key) == file) {
+          //   log.debug(s"not running maybeRecoverFromDeletion ${keyToFile(key)} ${file}")
+          //   //maybeRecoverFromDeletion(key)
+          // }
           notifyListeners(file, kind, WatchKeyManager.nonProxyListeners(key), key)
         }
       }
