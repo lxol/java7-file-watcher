@@ -3,14 +3,19 @@
 package org.ensime.indexer
 
 import akka.testkit._
+import akka.event.slf4j.SLF4JLogging
 import com.google.common.io.Files
 import file._
+import java.util.UUID
 import org.apache.commons.vfs2._
 import org.ensime.fixture._
 import org.ensime.util._
 import org.scalatest._
 import org.scalatest.tagobjects.Retryable
 
+import org.ensime.filewatcher._
+import scala.collection.immutable.Set
+import scala.language.implicitConversions
 sealed trait FileWatcherMessage
 case class Added(f: FileObject) extends FileWatcherMessage
 case class Removed(f: FileObject) extends FileWatcherMessage
@@ -147,7 +152,6 @@ abstract class FileWatcherSpec extends EnsimeSpec
           withClassWatcher(dir) { watcher =>
             // would be better if this was atomic (not possible from JVM?)
             dir.tree.reverse.foreach(_.delete())
-            Thread.sleep(300)
             parent.delete()
 
             val createOrDelete: Fish = {
@@ -181,7 +185,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
               case r: BaseRemoved => true
               case c: Changed => false
               case a: BaseAdded => true
-              case r: Removed => false // foo/bar
+              case r: Removed => false
             }
 
             tk.fishForMessage()(createOrDelete)
@@ -354,6 +358,45 @@ abstract class FileWatcherSpec extends EnsimeSpec
       }
     }
 
+  // it should "survive removal of a parent of a file base" taggedAs (Retryable) in
+  //   withVFS { implicit vfs =>
+  //     withTestKit { implicit tk =>
+  //       withTempDir { dir =>
+  //         tk.ignoreMsg {
+  //           case msg: Changed => true
+  //         }
+  //         val jar = (dir / "parent" / "jar.jar")
+  //         jar.createWithParents() shouldBe true
+  //         withJarWatcher(jar) { watcher =>
+  //           waitForLinus()
+  //           log.debug("remove recursively {}", dir)
+  //           dir.tree.reverse.foreach(_.delete())
+  //           tk.expectMsgType[Removed]
+  //           jar.createWithParents() shouldBe true
+  //           waitForLinus()
+  //           tk.expectMsgType[Added]
+  //         }
+  //       }
+  //     }
+  //   }
+
+  it should "be able to start up from a non-existent grandparent of a base file" taggedAs (Retryable) in
+    withVFS { implicit vfs =>
+      withTestKit { implicit tk =>
+        withTempDir { dir =>
+          val jar = (dir / "top" / "grand" / "parent" / "jar.jar")
+          (dir / "top").tree.reverse.foreach(_.delete())
+          withJarWatcher(jar) { watcher =>
+            waitForLinus()
+
+            jar.createWithParents() shouldBe true
+
+            tk.expectMsgType[Added]
+          }
+        }
+      }
+    }
+
   //////////////////////////////////////////////////////////////////////////////
   type -->[A, B] = PartialFunction[A, B]
   type Fish = PartialFunction[Any, Boolean]
@@ -383,11 +426,97 @@ abstract class FileWatcherSpec extends EnsimeSpec
 }
 
 class ApacheFileWatcherSpec extends FileWatcherSpec {
-  override def createClassWatcher(base: File)(implicit vfs: EnsimeVFS, tk: TestKit): Watcher =
-    //new ApachefPollingFileWatcher(base, ClassfileSelector, true, listeners)
-    new Java7Watcher(base, ClassfileSelector, true, listeners)
+
+  override def createClassWatcher(base: File)(implicit vfs: EnsimeVFS, tk: TestKit): Watcher = {
+    ClassWatcher.register(base, ClassfileSelector, true, listeners)
+  }
 
   override def createJarWatcher(jar: File)(implicit vfs: EnsimeVFS, tk: TestKit): Watcher =
-    //new ApachePollingFileWatcher(jar.getParentFile, JarSelector, false, listeners)
-    new Java7Watcher(jar.getParentFile, JarSelector, false, listeners)
+    JarWatcher.register(jar, JarSelector, false, listeners)
+}
+
+object JarWatcher extends BaseWatcher
+object ClassWatcher extends BaseWatcher
+
+class BaseWatcher extends SLF4JLogging {
+  val watcher: FileWatcher = new FileWatcher
+  def register(
+    base: File,
+    selector: ExtSelector,
+    recursive: Boolean,
+    listeners: Seq[FileChangeListener]
+  )(implicit vfs: EnsimeVFS) = {
+    log.debug("watching {}", base)
+
+    trait EnsimeWatcher extends Watcher {
+      import scala.language.reflectiveCalls
+      val w = watcher.spawnWatcher()
+
+      def create(): Unit = {
+        log.debug(
+          "create EnsimeWatcher {} for {}",
+          w.watcherId.asInstanceOf[Any], base
+        )
+        w.register(
+          base,
+          toWatcherListeners(
+            listeners,
+            selector,
+            recursive,
+            vfs,
+            base,
+            w.watcherId
+          )
+        )
+      }
+      override def shutdown(): Unit = {
+        log.debug("shutdown watcher {}", w.watcherId)
+        w.shutdown()
+      }
+    }
+    val ensimeWatcher = new EnsimeWatcher {}
+    ensimeWatcher.create()
+    ensimeWatcher
+  }
+  def toWatcherListeners(
+    ws: Seq[FileChangeListener],
+    selector: ExtSelector,
+    rec: Boolean,
+    vfs: EnsimeVFS,
+    baseFile: File,
+    uuid: UUID
+  ): Set[WatcherListener] = {
+    ws.toSet[FileChangeListener] map {
+
+      l: FileChangeListener =>
+        new WatcherListener() {
+          override val base = baseFile
+          override val recursive = rec
+          override val extensions = selector.include
+          override val treatExistingAsNew = !baseFile.isFile
+          override val watcherId = uuid
+
+          override def fileCreated(f: File) = {
+            log.debug("fileAdded {}", f)
+            l.fileAdded(vfs.vfile(f))
+          }
+          override def fileDeleted(f: File) = {
+            log.debug("fileDeleted {}", f)
+            l.fileRemoved(vfs.vfile(f))
+          }
+          override def fileModified(f: File) = {
+            log.debug("fileModified {}", f)
+            l.fileChanged(vfs.vfile(f))
+          }
+          override def baseReCreated(f: File) = {
+            log.debug("baseReCreated {}", f)
+            l.baseReCreated(vfs.vfile(f))
+          }
+          override def baseRemoved(f: File) = {
+            log.debug("baseRemoved {}", f)
+            l.baseRemoved(vfs.vfile(f))
+          }
+        }
+    }
+  }
 }
