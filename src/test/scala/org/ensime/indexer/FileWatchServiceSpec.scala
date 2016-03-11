@@ -425,7 +425,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
 }
 
-class ApacheFileWatcherSpec extends FileWatcherSpec {
+class FileWatchServiceSpec extends FileWatcherSpec {
 
   override def createClassWatcher(base: File)(implicit vfs: EnsimeVFS, tk: TestKit): Watcher = {
     ClassWatcher.register(base, ClassfileSelector, true, listeners)
@@ -439,7 +439,7 @@ object JarWatcher extends BaseWatcher
 object ClassWatcher extends BaseWatcher
 
 class BaseWatcher extends SLF4JLogging {
-  val watcher: FileWatcher = new FileWatcher
+  val fileWatchService: FileWatchService = new FileWatchService
   def register(
     base: File,
     selector: ExtSelector,
@@ -450,7 +450,7 @@ class BaseWatcher extends SLF4JLogging {
 
     trait EnsimeWatcher extends Watcher {
       import scala.language.reflectiveCalls
-      val w = watcher.spawnWatcher()
+      val w = fileWatchService.spawnWatcher()
 
       def create(): Unit = {
         log.debug(
