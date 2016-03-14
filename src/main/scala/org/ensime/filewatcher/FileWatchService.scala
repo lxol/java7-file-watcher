@@ -23,7 +23,7 @@ import scala.util.control.Breaks._
 
 import org.slf4j.{ Logger, LoggerFactory }
 
-class FileWatcher {
+class FileWatchService {
   self =>
   val log = LoggerFactory.getLogger(getClass)
 
@@ -269,16 +269,8 @@ class FileWatcher {
   }
 
   def spawnWatcher() = {
-    trait ChildWatcher {
-      val watcherId = UUID.randomUUID()
-      def register(file: File, listeners: Set[WatcherListener]): Unit = {
-        self.watch(file, listeners)
-      }
-      def shutdown() = {
-        self.WatchKeyManager.removeObservers(watcherId)
-      }
-    }
-    new ChildWatcher() {
+    new Watcher() {
+      val fileWatchService = self;
     }
   }
 
@@ -513,6 +505,17 @@ class FileWatcher {
         case None => false
       }
     }
+  }
+}
+
+trait Watcher {
+  val fileWatchService: FileWatchService
+  val watcherId = UUID.randomUUID()
+  def register(file: File, listeners: Set[WatcherListener]): Unit = {
+    fileWatchService.watch(file, listeners)
+  }
+  def shutdown() = {
+    fileWatchService.WatchKeyManager.removeObservers(watcherId)
   }
 }
 

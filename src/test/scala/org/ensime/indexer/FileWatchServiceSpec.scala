@@ -10,7 +10,6 @@ import java.util.UUID
 import org.apache.commons.vfs2._
 import org.ensime.fixture._
 import org.ensime.util._
-import org.scalatest._
 import org.scalatest.tagobjects.Retryable
 
 import org.ensime.filewatcher._
@@ -29,7 +28,6 @@ case class BaseRemoved(f: FileObject) extends FileWatcherMessage
  * true OS and FS support, which is lacking on all major platforms.
  */
 abstract class FileWatcherSpec extends EnsimeSpec
-    with ParallelTestExecution
     with IsolatedTestKitFixture with IsolatedEnsimeVFSFixture {
 
   // variant that watches a jar file
@@ -48,6 +46,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
     Thread.sleep(1000)
   }
 
+  def waitForOSX(): Unit = {
+    Thread.sleep(10001)
+  }
+
   "FileWatcher" should "detect added files" taggedAs (Retryable) in
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
@@ -58,7 +60,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
           }
@@ -78,7 +80,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             bar.createWithParents() shouldBe true
             foo.isFile() shouldBe true
             bar.isFile() shouldBe true
-
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
 
@@ -86,6 +88,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.writeString("foo")
             bar.writeString("bar")
+            waitForOSX()
             tk.expectMsgType[Changed]
             tk.expectMsgType[Changed]
           }
@@ -107,6 +110,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
 
@@ -114,6 +118,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.delete()
             bar.delete()
+            waitForOSX()
             tk.expectMsgType[Removed]
             tk.expectMsgType[Removed]
           }
@@ -129,7 +134,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             dir.delete()
-
+            waitForOSX()
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
               case a: BaseAdded => true
@@ -153,7 +158,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             // would be better if this was atomic (not possible from JVM?)
             dir.tree.reverse.foreach(_.delete())
             parent.delete()
-
+            waitForOSX()
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
               case a: BaseAdded => true
@@ -175,12 +180,13 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
 
             waitForLinus()
             dir.tree.reverse.foreach(_.delete())
-
+            waitForOSX()
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
               case c: Changed => false
@@ -193,6 +199,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+            waitForOSX()
             val nonDeterministicAdd: Fish = {
               case a: Added => true
               case c: Changed => true
@@ -219,7 +226,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
           }
@@ -241,6 +248,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+            waitForOSX()
             tk.expectMsgType[Added]
             tk.expectMsgType[Added]
 
@@ -249,7 +257,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             dir.tree.reverse.foreach(_.delete())
             Thread.sleep(300)
             parent.delete()
-
+            waitForOSX()
             val createOrDelete: Fish = {
               case r: BaseRemoved => true
               case c: Changed => false
@@ -261,7 +269,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-
+            waitForOSX()
             // non-deterministically receive zero, one or two more Removed
             // and either Added or Changed for foo / bar.
             val nonDeterministicAdd: Fish = {
@@ -290,6 +298,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             jar.writeString("binks")
+            waitForOSX()
             tk.expectMsgType[Changed]
           }
         }
@@ -311,6 +320,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             jar.delete()
+            waitForOSX()
             tk.expectMsgType[Removed]
           }
         }
@@ -326,7 +336,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             jar.createWithParents() shouldBe true
-
+            waitForOSX()
             tk.expectMsgType[Added]
           }
         }
@@ -348,10 +358,12 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             jar.delete() // best thing for him, frankly
+            waitForOSX()
             tk.expectMsgType[Removed]
 
             waitForLinus()
             jar.writeString("binks")
+            waitForOSX()
             tk.expectMsgType[Added]
           }
         }
@@ -371,9 +383,11 @@ abstract class FileWatcherSpec extends EnsimeSpec
   //           waitForLinus()
   //           log.debug("remove recursively {}", dir)
   //           dir.tree.reverse.foreach(_.delete())
+  //           waitForOSX()
   //           tk.expectMsgType[Removed]
   //           jar.createWithParents() shouldBe true
   //           waitForLinus()
+  //           waitForOSX()
   //           tk.expectMsgType[Added]
   //         }
   //       }
@@ -390,7 +404,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             waitForLinus()
 
             jar.createWithParents() shouldBe true
-
+            waitForOSX()
             tk.expectMsgType[Added]
           }
         }
@@ -425,7 +439,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
 }
 
-class ApacheFileWatcherSpec extends FileWatcherSpec {
+class FileWatchServiceSpec extends FileWatcherSpec {
 
   override def createClassWatcher(base: File)(implicit vfs: EnsimeVFS, tk: TestKit): Watcher = {
     ClassWatcher.register(base, ClassfileSelector, true, listeners)
@@ -439,7 +453,7 @@ object JarWatcher extends BaseWatcher
 object ClassWatcher extends BaseWatcher
 
 class BaseWatcher extends SLF4JLogging {
-  val watcher: FileWatcher = new FileWatcher
+  val fileWatchService: FileWatchService = new FileWatchService
   def register(
     base: File,
     selector: ExtSelector,
@@ -450,7 +464,7 @@ class BaseWatcher extends SLF4JLogging {
 
     trait EnsimeWatcher extends Watcher {
       import scala.language.reflectiveCalls
-      val w = watcher.spawnWatcher()
+      val w = fileWatchService.spawnWatcher()
 
       def create(): Unit = {
         log.debug(
