@@ -187,19 +187,16 @@ class FileWatchService {
       closeWatchService()
 
       def processEvents(key: WatchKey) = {
-        //log.debug("start processing events for {}", keyToFile(key))
 
         for (event <- key.pollEvents) {
           val kind = event.kind
           val file = key.watchable.asInstanceOf[Path]
             .resolve(event.context.asInstanceOf[Path]).toFile
 
-          log.debug(s"event: ${kind} for ${file}")
 
           if (kind == ENTRY_CREATE
             && Files.isDirectory(file.toPath, LinkOption.NOFOLLOW_LINKS)
             && WatchKeyManager.hasRecursive(key)) {
-            log.debug(s"watch a subdirectory ${file}")
             watch(
               file,
               WatchKeyManager.recListeners(key)
@@ -207,14 +204,9 @@ class FileWatchService {
           }
 
           if (kind == ENTRY_CREATE) {
-            log.debug(s"maybeAdvanceProxy ${keyToFile(key)} ${file}")
             WatchKeyManager.maybeAdvanceProxy(key, file)
           }
 
-          // if (kind == ENTRY_DELETE && keyToFile(key) == file) {
-          //   log.debug(s"not running maybeRecoverFromDeletion ${keyToFile(key)} ${file}")
-          //   //maybeRecoverFromDeletion(key)
-          // }
           notifyListeners(file, kind, WatchKeyManager.nonProxyListeners(key), key)
         }
       }
@@ -227,7 +219,6 @@ class FileWatchService {
           if (!key.mkdirs) {
             log.error("Unable to re-create {} with parents", key)
           } else {
-            //log.debug("re-watch {}", keyToCanonicalPath(key))
             val listeners = WatchKeyManager.listeners(key)
             val baseListeners = WatchKeyManager.baseListeners(key)
             listeners foreach { _.baseRemoved(key) }
@@ -275,21 +266,16 @@ class FileWatchService {
   }
 
   private def notifyListeners(f: File, kind: Kind[_], listeners: Set[WatcherListener], key: WatchKey) = {
-    //log.trace("got {event} for {f}")
     if (kind == ENTRY_CREATE) {
-      //log.debug(s"detected ENTRY_CREATE ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileCreated(f) }
     }
     if (kind == ENTRY_MODIFY) {
-      //log.debug(s"detected ENTRY_MODIFY ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileModified(f) }
     }
     if (kind == ENTRY_DELETE) {
-      //log.debug(s"detected ENTRY_DELETE ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileDeleted(f) }
     }
     if (kind == OVERFLOW) {
-      //log.debug(s"detected OVERFLOW ${f} for ${keyToFile(key)}")
     }
   }
 
