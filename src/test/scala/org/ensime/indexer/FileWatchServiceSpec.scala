@@ -177,6 +177,11 @@ abstract class FileWatcherSpec extends EnsimeSpec
           withClassWatcher(dir) { watcher =>
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
+            tk.ignoreMsg {
+              case BaseRemoved(f) => new File(f.getURL.getFile) != dir
+              case BaseAdded(f) => new File(f.getURL.getFile) != dir
+              case c: Changed => true
+            }
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
@@ -188,9 +193,9 @@ abstract class FileWatcherSpec extends EnsimeSpec
             dir.tree.reverse.foreach(_.delete())
             waitForOSX()
             val createOrDelete: Fish = {
-              case r: BaseRemoved => true
+              case BaseRemoved(f) => new File(f.getURL.getFile) == dir
               case c: Changed => false
-              case a: BaseAdded => true
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
               case r: Removed => false
             }
 
@@ -199,10 +204,18 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
+
             waitForOSX()
+
+            tk.ignoreMsg {
+              case BaseRemoved(f) => true
+            }
+
             val nonDeterministicAdd: Fish = {
-              case a: Added => true
-              case c: Changed => true
+              case Added(f) => {
+                val a = new File(f.getURL.getFile)
+                a == foo || a == bar
+              }
               case r: Removed => false
             }
             tk.fishForMessage()(nonDeterministicAdd)
