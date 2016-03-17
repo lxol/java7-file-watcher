@@ -193,7 +193,6 @@ class FileWatchService {
           val file = key.watchable.asInstanceOf[Path]
             .resolve(event.context.asInstanceOf[Path]).toFile
 
-
           if (kind == ENTRY_CREATE
             && Files.isDirectory(file.toPath, LinkOption.NOFOLLOW_LINKS)
             && WatchKeyManager.hasRecursive(key)) {
@@ -259,8 +258,12 @@ class FileWatchService {
     }
   }
 
-  def spawnWatcher() = {
-    new Watcher() {
+  def spawnWatcher(): Watcher = {
+    spawnWatcher(UUID.randomUUID())
+  }
+
+  def spawnWatcher(uuid: UUID) = {
+    new Watcher(uuid) {
       val fileWatchService = self;
     }
   }
@@ -494,9 +497,8 @@ class FileWatchService {
   }
 }
 
-trait Watcher {
+abstract class Watcher(val watcherId: UUID) {
   val fileWatchService: FileWatchService
-  val watcherId = UUID.randomUUID()
   def register(file: File, listeners: Set[WatcherListener]): Unit = {
     fileWatchService.watch(file, listeners)
   }
