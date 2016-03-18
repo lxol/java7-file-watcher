@@ -170,13 +170,13 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             dir.delete()
             waitForOSX()
-            val createOrDelete: Fish = {
-              case r: BaseRemoved => true
-              case a: BaseAdded => true
+            val baseRemovedAndCreated: Fish = {
+              case BaseRemoved(f) => new File(f.getURL.getFile) == dir
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
             }
 
-            tk.fishForMessage()(createOrDelete)
-            tk.fishForMessage()(createOrDelete)
+            tk.fishForMessage()(baseRemovedAndCreated)
+            tk.fishForMessage()(baseRemovedAndCreated)
           }
         }
       }
