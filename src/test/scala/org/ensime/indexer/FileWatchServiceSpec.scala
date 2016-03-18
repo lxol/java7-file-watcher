@@ -10,6 +10,7 @@ import java.util.UUID
 import org.apache.commons.vfs2._
 import org.ensime.fixture._
 import org.ensime.util._
+import org.scalatest.ParallelTestExecution
 import org.scalatest.tagobjects.Retryable
 
 import org.ensime.filewatcher._
@@ -28,6 +29,7 @@ case class BaseRemoved(f: FileObject) extends FileWatcherMessage
  * true OS and FS support, which is lacking on all major platforms.
  */
 abstract class FileWatcherSpec extends EnsimeSpec
+    with ParallelTestExecution
     with IsolatedTestKitFixture with IsolatedEnsimeVFSFixture {
 
   // variant that watches a jar file
@@ -181,6 +183,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
               case BaseRemoved(f) => new File(f.getURL.getFile) != dir
               case BaseAdded(f) => new File(f.getURL.getFile) != dir
               case c: Changed => true
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile != foo && addedFile != bar
+              }
             }
 
             foo.createWithParents() shouldBe true
@@ -383,29 +389,30 @@ abstract class FileWatcherSpec extends EnsimeSpec
       }
     }
 
-  // it should "survive removal of a parent of a file base" taggedAs (Retryable) in
-  //   withVFS { implicit vfs =>
-  //     withTestKit { implicit tk =>
-  //       withTempDir { dir =>
-  //         tk.ignoreMsg {
-  //           case msg: Changed => true
-  //         }
-  //         val jar = (dir / "parent" / "jar.jar")
-  //         jar.createWithParents() shouldBe true
-  //         withJarWatcher(jar) { watcher =>
-  //           waitForLinus()
-  //           log.debug("remove recursively {}", dir)
-  //           dir.tree.reverse.foreach(_.delete())
-  //           waitForOSX()
-  //           tk.expectMsgType[Removed]
-  //           jar.createWithParents() shouldBe true
-  //           waitForLinus()
-  //           waitForOSX()
-  //           tk.expectMsgType[Added]
-  //         }
-  //       }
-  //     }
-  //   }
+  it should "survive removal of a parent of a file base" taggedAs (Retryable) in
+    withVFS { implicit vfs =>
+      withTestKit { implicit tk =>
+        withTempDir { dir =>
+          tk.ignoreMsg {
+            case msg: Changed => true
+            case msg: BaseRemoved => true
+          }
+          val jar = (dir / "parent" / "jar.jar")
+          jar.createWithParents() shouldBe true
+          withJarWatcher(jar) { watcher =>
+            waitForLinus()
+            log.debug("remove recursively {}", dir)
+            dir.tree.reverse.foreach(_.delete())
+            waitForOSX()
+            tk.expectMsgType[Removed]
+            jar.createWithParents() shouldBe true
+            waitForLinus()
+            waitForOSX()
+            tk.expectMsgType[Added]
+          }
+        }
+      }
+    }
 
   it should "be able to start up from a non-existent grandparent of a base file" taggedAs (Retryable) in
     withVFS { implicit vfs =>
