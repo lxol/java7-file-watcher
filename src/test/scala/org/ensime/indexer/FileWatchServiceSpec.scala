@@ -63,8 +63,16 @@ abstract class FileWatcherSpec extends EnsimeSpec
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
             waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
+            val fooOrBarAdded: Fish = {
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+            }
+
+            tk.fishForMessage()(fooOrBarAdded)
+            tk.fishForMessage()(fooOrBarAdded)
+
           }
         }
       }
@@ -83,16 +91,29 @@ abstract class FileWatcherSpec extends EnsimeSpec
             foo.isFile() shouldBe true
             bar.isFile() shouldBe true
             waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
+            val fooOrBarAdded: Fish = {
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+            }
+            tk.fishForMessage()(fooOrBarAdded)
+            tk.fishForMessage()(fooOrBarAdded)
 
             waitForLinus()
 
             foo.writeString("foo")
             bar.writeString("bar")
             waitForOSX()
-            tk.expectMsgType[Changed]
-            tk.expectMsgType[Changed]
+            val fooOrBarChanged: Fish = {
+              case Changed(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+            }
+
+            tk.fishForMessage()(fooOrBarChanged)
+            tk.fishForMessage()(fooOrBarChanged)
           }
         }
       }
@@ -113,16 +134,28 @@ abstract class FileWatcherSpec extends EnsimeSpec
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
             waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
+            val fooOrBarAdded: Fish = {
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+            }
+            tk.fishForMessage()(fooOrBarAdded)
+            tk.fishForMessage()(fooOrBarAdded)
 
             waitForLinus()
 
             foo.delete()
             bar.delete()
             waitForOSX()
-            tk.expectMsgType[Removed]
-            tk.expectMsgType[Removed]
+            val fooOrBarRemoved: Fish = {
+              case Removed(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+            }
+            tk.fishForMessage()(fooOrBarRemoved)
+            tk.fishForMessage()(fooOrBarRemoved)
           }
         }
       }
