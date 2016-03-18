@@ -124,9 +124,9 @@ abstract class FileWatcherSpec extends EnsimeSpec
       withTestKit { implicit tk =>
         withTempDir { dir =>
           withClassWatcher(dir) { watcher =>
-            tk.ignoreMsg {
-              case msg: Changed => true
-            }
+            // tk.ignoreMsg {
+            //   case msg: Changed => true
+            // }
 
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
@@ -194,12 +194,12 @@ abstract class FileWatcherSpec extends EnsimeSpec
             dir.tree.reverse.foreach(_.delete())
             parent.delete()
             waitForOSX()
-            val createOrDelete: Fish = {
-              case r: BaseRemoved => true
-              case a: BaseAdded => true
+            val baseRemovedAndCreated: Fish = {
+              case BaseRemoved(f) => new File(f.getURL.getFile) == dir
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
             }
-            tk.fishForMessage()(createOrDelete)
-            tk.fishForMessage()(createOrDelete)
+            tk.fishForMessage()(baseRemovedAndCreated)
+            tk.fishForMessage()(baseRemovedAndCreated)
           }
         } finally parent.tree.reverse.foreach(_.delete())
       }
