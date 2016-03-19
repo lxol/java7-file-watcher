@@ -122,13 +122,16 @@ class FileWatchService {
       observers foreach { WatchKeyManager.addObserver(key, _) }
 
       dir.listFiles.filter(f => f.isFile)
-        .foreach {
-          notifyListeners(
-            _,
-            ENTRY_CREATE,
-            listeners.filter { _.treatExistingAsNew },
-            key
-          )
+        .foreach { file =>
+          {
+            log.debug(s"existing file ${file}")
+            notifyListeners(
+              file,
+              ENTRY_CREATE,
+              listeners.filter { _.treatExistingAsNew },
+              key
+            )
+          }
         }
 
       if (WatchKeyManager.hasProxy(key)) {
@@ -210,13 +213,18 @@ class FileWatchService {
         }
       }
 
-      def maybeRecoverFromDeletion(key: WatchKey) = {
+      def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
         if (WatchKeyManager.hasBase(key)
           || WatchKeyManager.hasBaseFile(key)
           || WatchKeyManager.hasProxy(key)) {
 
-          if (!key.mkdirs) {
-            log.error("Unable to re-create {} with parents", key)
+          if (!key.mkdirs && !key.exists) {
+            if (retry <= 3) {
+              Thread.sleep(20)
+              log.error("retry re-create {} with parents", keyToFile(key))
+              maybeRecoverFromDeletion(key, retry + 1)
+            }
+            log.error("Unable to re-create {} with parents", keyToFile(key))
           } else {
             val listeners = WatchKeyManager.listeners(key)
             val baseListeners = WatchKeyManager.baseListeners(key)
@@ -305,22 +313,22 @@ class FileWatchService {
   case class BaseObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override lazy val treatExistingAsNew = watcherListener.treatExistingAsNew
     override lazy val recursive = watcherListener.recursive
-    override val observerType = "BaseListener"
+    override val observerType = "BaseObserver"
   }
   case class BaseFileObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
-    val treatExistingAsNew = false
+    val treatExistingAsNew = true
     val recursive = false
-    override val observerType = "BaseFileListener"
+    override val observerType = "BaseFileObserver"
   }
   case class ProxyObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override val treatExistingAsNew = true
     val recursive = false
-    override val observerType = "ProxyListener"
+    override val observerType = "ProxyObserver"
   }
   case class BaseSubdirObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override lazy val treatExistingAsNew = watcherListener.treatExistingAsNew
     override lazy val recursive = watcherListener.recursive
-    override val observerType = "BaseSubdirListener"
+    override val observerType = "BaseSubdirObserver"
   }
 
   trait WatchKeyObserver {

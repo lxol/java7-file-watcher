@@ -15,6 +15,7 @@ import org.scalatest.tagobjects.Retryable
 
 import org.ensime.filewatcher._
 import scala.collection.immutable.Set
+import scala.concurrent.duration._
 import scala.language.implicitConversions
 sealed trait FileWatcherMessage
 case class Added(f: FileObject) extends FileWatcherMessage
@@ -45,12 +46,13 @@ abstract class FileWatcherSpec extends EnsimeSpec
    * sub-second (without looking at the contents).
    */
   def waitForLinus(): Unit = {
-    Thread.sleep(1000)
+    Thread.sleep(2000)
   }
 
   def waitForOSX(): Unit = {
     Thread.sleep(10001)
   }
+  val maxWait = 11 seconds
 
   "FileWatcher" should "detect added files" taggedAs (Retryable) in
     withVFS { implicit vfs =>
@@ -62,17 +64,15 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForOSX()
             val fooOrBarAdded: Fish = {
               case Added(f) => {
                 val addedFile = new File(f.getURL.getFile)
                 addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
-
-            tk.fishForMessage()(fooOrBarAdded)
-            tk.fishForMessage()(fooOrBarAdded)
-
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
           }
         }
       }
@@ -90,30 +90,28 @@ abstract class FileWatcherSpec extends EnsimeSpec
             bar.createWithParents() shouldBe true
             foo.isFile() shouldBe true
             bar.isFile() shouldBe true
-            waitForOSX()
             val fooOrBarAdded: Fish = {
               case Added(f) => {
                 val addedFile = new File(f.getURL.getFile)
                 addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
-            tk.fishForMessage()(fooOrBarAdded)
-            tk.fishForMessage()(fooOrBarAdded)
-
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
             waitForLinus()
-
             foo.writeString("foo")
             bar.writeString("bar")
-            waitForOSX()
             val fooOrBarChanged: Fish = {
               case Changed(f) => {
                 val addedFile = new File(f.getURL.getFile)
                 addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
 
-            tk.fishForMessage()(fooOrBarChanged)
-            tk.fishForMessage()(fooOrBarChanged)
+            tk.fishForMessage(maxWait)(fooOrBarChanged)
+            tk.fishForMessage(maxWait)(fooOrBarChanged)
           }
         }
       }
@@ -124,38 +122,34 @@ abstract class FileWatcherSpec extends EnsimeSpec
       withTestKit { implicit tk =>
         withTempDir { dir =>
           withClassWatcher(dir) { watcher =>
-            // tk.ignoreMsg {
-            //   case msg: Changed => true
-            // }
 
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
-
+            log.debug(s"detect added / removed files ${foo} ${bar}")
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForOSX()
             val fooOrBarAdded: Fish = {
               case Added(f) => {
                 val addedFile = new File(f.getURL.getFile)
                 addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
-            tk.fishForMessage()(fooOrBarAdded)
-            tk.fishForMessage()(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
 
+            foo.delete() shouldBe true
+            bar.delete() shouldBe true
             waitForLinus()
-
-            foo.delete()
-            bar.delete()
-            waitForOSX()
             val fooOrBarRemoved: Fish = {
               case Removed(f) => {
                 val addedFile = new File(f.getURL.getFile)
                 addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
-            tk.fishForMessage()(fooOrBarRemoved)
-            tk.fishForMessage()(fooOrBarRemoved)
+            tk.fishForMessage(maxWait)(fooOrBarRemoved)
+            tk.fishForMessage(maxWait)(fooOrBarRemoved)
           }
         }
       }
@@ -166,17 +160,17 @@ abstract class FileWatcherSpec extends EnsimeSpec
       withTestKit { implicit tk =>
         withTempDir { dir =>
           withClassWatcher(dir) { watcher =>
-            waitForLinus()
 
             dir.delete()
-            waitForOSX()
+
             val baseRemovedAndCreated: Fish = {
               case BaseRemoved(f) => new File(f.getURL.getFile) == dir
               case BaseAdded(f) => new File(f.getURL.getFile) == dir
+              case _ => false
             }
 
-            tk.fishForMessage()(baseRemovedAndCreated)
-            tk.fishForMessage()(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
           }
         }
       }
@@ -190,16 +184,16 @@ abstract class FileWatcherSpec extends EnsimeSpec
         dir.mkdirs()
         try {
           withClassWatcher(dir) { watcher =>
-            // would be better if this was atomic (not possible from JVM?)
             dir.tree.reverse.foreach(_.delete())
             parent.delete()
-            waitForOSX()
             val baseRemovedAndCreated: Fish = {
               case BaseRemoved(f) => new File(f.getURL.getFile) == dir
               case BaseAdded(f) => new File(f.getURL.getFile) == dir
+              case _ => false
             }
-            tk.fishForMessage()(baseRemovedAndCreated)
-            tk.fishForMessage()(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
+
           }
         } finally parent.tree.reverse.foreach(_.delete())
       }
@@ -212,53 +206,43 @@ abstract class FileWatcherSpec extends EnsimeSpec
           withClassWatcher(dir) { watcher =>
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
-            tk.ignoreMsg {
-              case BaseRemoved(f) => new File(f.getURL.getFile) != dir
-              case BaseAdded(f) => new File(f.getURL.getFile) != dir
-              case c: Changed => true
+            log.debug("start: survive deletion of the watched directory")
+            foo.createWithParents() shouldBe true
+            bar.createWithParents() shouldBe true
+            val fooOrBarAdded: Fish = {
               case Added(f) => {
                 val addedFile = new File(f.getURL.getFile)
-                addedFile != foo && addedFile != bar
+                addedFile == foo || addedFile == bar
               }
+              case _ => false
             }
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
 
-            foo.createWithParents() shouldBe true
-            bar.createWithParents() shouldBe true
-            waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
-
-            waitForLinus()
             dir.tree.reverse.foreach(_.delete())
-            waitForOSX()
-            val createOrDelete: Fish = {
+
+            val baseRemovedAndCreated: Fish = {
               case BaseRemoved(f) => new File(f.getURL.getFile) == dir
-              case c: Changed => false
               case BaseAdded(f) => new File(f.getURL.getFile) == dir
-              case r: Removed => false
+              case _ => false
             }
 
-            tk.fishForMessage()(createOrDelete)
-            tk.fishForMessage()(createOrDelete)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
 
-            waitForOSX()
-
-            tk.ignoreMsg {
-              case BaseRemoved(f) => true
-            }
-
-            val nonDeterministicAdd: Fish = {
-              case Added(f) => {
-                val a = new File(f.getURL.getFile)
-                a == foo || a == bar
-              }
-              case r: Removed => false
-            }
-            tk.fishForMessage()(nonDeterministicAdd)
-            tk.fishForMessage()(nonDeterministicAdd)
+            // val fooOrBarAdded2: Fish = {
+            //   case Added(f) => {
+            //     val addedFile = new File(f.getURL.getFile)
+            //     addedFile == foo || addedFile == bar
+            //   }
+            //   case _ => false
+            // }
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            log.debug("end: survive deletion of the watched directory")
           }
         }
       }
@@ -267,20 +251,26 @@ abstract class FileWatcherSpec extends EnsimeSpec
   it should "be able to start up from a non-existent directory" taggedAs (Retryable) in
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
-        val dir = Files.createTempDir().canon
+        val root = Files.createTempDir().canon
+        val dir = (root / "dir")
         dir.delete()
         try {
           withClassWatcher(dir) { watcher =>
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
 
-            waitForLinus()
-
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
+            waitForLinus()
+            val fooOrBarAdded: Fish = {
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
           }
         } finally dir.tree.reverse.foreach(_.delete())
       }
@@ -300,38 +290,35 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForOSX()
-            tk.expectMsgType[Added]
-            tk.expectMsgType[Added]
-
             waitForLinus()
+            val fooOrBarAdded: Fish = {
+              case Added(f) => {
+                val addedFile = new File(f.getURL.getFile)
+                addedFile == foo || addedFile == bar
+              }
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
 
             dir.tree.reverse.foreach(_.delete())
-            Thread.sleep(300)
+
             parent.delete()
-            waitForOSX()
-            val createOrDelete: Fish = {
-              case r: BaseRemoved => true
-              case c: Changed => false
-              case a: BaseAdded => true
-              case r: Removed => false
+            val baseRemovedAndCreated: Fish = {
+              case BaseRemoved(f) => new File(f.getURL.getFile) == dir
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
+              case _ => false
             }
-            tk.fishForMessage()(createOrDelete)
-            tk.fishForMessage()(createOrDelete)
+
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
+            tk.fishForMessage(maxWait)(baseRemovedAndCreated)
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForOSX()
-            // non-deterministically receive zero, one or two more Removed
-            // and either Added or Changed for foo / bar.
-            val nonDeterministicAdd: Fish = {
-              case a: Added => true
-              case c: Changed => true
-              case a: BaseAdded => false
-              case r: Removed => false
-            }
-            tk.fishForMessage()(nonDeterministicAdd)
-            tk.fishForMessage()(nonDeterministicAdd)
+            waitForLinus()
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+            tk.fishForMessage(maxWait)(fooOrBarAdded)
+
           }
         } finally dir.tree.reverse.foreach(_.delete())
       }
@@ -347,11 +334,14 @@ abstract class FileWatcherSpec extends EnsimeSpec
           jar.createWithParents() shouldBe true
 
           withJarWatcher(jar) { watcher =>
-            waitForLinus()
-
+            log.debug(s"detect changes to a file base ${jar}")
             jar.writeString("binks")
-            waitForOSX()
-            tk.expectMsgType[Changed]
+            val jarChanged: Fish = {
+              case Changed(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarChanged)
+
           }
         }
       }
@@ -361,19 +351,18 @@ abstract class FileWatcherSpec extends EnsimeSpec
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
         withTempDir { dir =>
-          tk.ignoreMsg {
-            case msg: Changed => true
-          }
-
-          val jar = (dir / "jar.jar")
+          val root = (dir / "root")
+          val jar = (root / "jar.jar")
+          waitForLinus()
           jar.createWithParents() shouldBe true
 
           withJarWatcher(jar) { watcher =>
-            waitForLinus()
-
             jar.delete()
-            waitForOSX()
-            tk.expectMsgType[Removed]
+            val jarRemoved: Fish = {
+              case Removed(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarRemoved)
           }
         }
       }
@@ -386,10 +375,12 @@ abstract class FileWatcherSpec extends EnsimeSpec
           val jar = (dir / "jar.jar")
           withJarWatcher(jar) { watcher =>
             waitForLinus()
-
             jar.createWithParents() shouldBe true
-            waitForOSX()
-            tk.expectMsgType[Added]
+            val jarAdded: Fish = {
+              case Added(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarAdded)
           }
         }
       }
@@ -398,25 +389,36 @@ abstract class FileWatcherSpec extends EnsimeSpec
   it should "survive removal of a file base" taggedAs (Retryable) in
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
-        withTempDir { dir =>
-          tk.ignoreMsg {
-            case msg: Changed => true
-          }
-
+        withTempDir { root =>
+          // tk.ignoreMsg {
+          //   case msg: Changed => true
+          // }
+          val dir = (root / "base")
           val jar = (dir / "jar.jar")
+
+          log.debug(s"survive removal of a file base ${jar}")
           jar.createWithParents() shouldBe true
 
           withJarWatcher(jar) { watcher =>
+
+            jar.delete() shouldBe true
+            log.debug(s"survive deleted a file ${jar}")
             waitForLinus()
 
-            jar.delete() // best thing for him, frankly
-            waitForOSX()
-            tk.expectMsgType[Removed]
+            val jarRemoved: Fish = {
+              case Removed(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarRemoved)
 
-            waitForLinus()
             jar.writeString("binks")
-            waitForOSX()
-            tk.expectMsgType[Added]
+            jar.exists shouldBe true
+            val jarAdded: Fish = {
+              case Added(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarAdded)
+            log.debug(s"end of survive removal of a file base ${jar}")
           }
         }
       }
@@ -426,22 +428,26 @@ abstract class FileWatcherSpec extends EnsimeSpec
     withVFS { implicit vfs =>
       withTestKit { implicit tk =>
         withTempDir { dir =>
-          tk.ignoreMsg {
-            case msg: Changed => true
-            case msg: BaseRemoved => true
-          }
           val jar = (dir / "parent" / "jar.jar")
           jar.createWithParents() shouldBe true
           withJarWatcher(jar) { watcher =>
             waitForLinus()
-            log.debug("remove recursively {}", dir)
             dir.tree.reverse.foreach(_.delete())
-            waitForOSX()
-            tk.expectMsgType[Removed]
+            log.debug(s"deleted ${dir}")
+            val jarRemoved: Fish = {
+              case Removed(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarRemoved)
+            log.debug(s"before created ${jar}")
             jar.createWithParents() shouldBe true
-            waitForLinus()
-            waitForOSX()
-            tk.expectMsgType[Added]
+            log.debug(s"created ${jar}")
+            val jarAdded: Fish = {
+              case Added(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarAdded)
+
           }
         }
       }
@@ -454,11 +460,17 @@ abstract class FileWatcherSpec extends EnsimeSpec
           val jar = (dir / "top" / "grand" / "parent" / "jar.jar")
           (dir / "top").tree.reverse.foreach(_.delete())
           withJarWatcher(jar) { watcher =>
-            waitForLinus()
+            //waitForLinus()
 
             jar.createWithParents() shouldBe true
-            waitForOSX()
-            tk.expectMsgType[Added]
+            //waitForOSX()
+            waitForLinus()
+            val jarAdded: Fish = {
+              case Added(f) => new File(f.getURL.getFile) == jar
+              case _ => false
+            }
+            tk.fishForMessage(maxWait)(jarAdded)
+
           }
         }
       }
@@ -470,12 +482,14 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
   def withClassWatcher[T](base: File)(code: Watcher => T)(implicit vfs: EnsimeVFS, tk: TestKit) = {
     val w = createClassWatcher(base)
+    waitForLinus()
     try code(w)
     finally w.shutdown()
   }
 
   def withJarWatcher[T](jar: File)(code: Watcher => T)(implicit vfs: EnsimeVFS, tk: TestKit) = {
     val w = createJarWatcher(jar)
+    waitForLinus()
     try code(w)
     finally w.shutdown()
   }
@@ -560,7 +574,7 @@ class BaseWatcher extends SLF4JLogging {
           override val base = baseFile
           override val recursive = rec
           override val extensions = selector.include
-          override val treatExistingAsNew = !baseFile.isFile
+          override val treatExistingAsNew = true //!baseFile.isFile
           override val watcherId = uuid
 
           override def fileCreated(f: File) = {
