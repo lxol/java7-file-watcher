@@ -120,6 +120,7 @@ class FileWatchService {
       }
       log.debug(s"add ${observers.size} listeners to ${dir} ")
       observers foreach { WatchKeyManager.addObserver(key, _) }
+      observers foreach { _.watcherListener.baseReCreated(key) }
 
       dir.listFiles.filter(f => f.isFile)
         .foreach { file =>

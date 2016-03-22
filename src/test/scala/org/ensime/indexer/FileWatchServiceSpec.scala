@@ -12,6 +12,7 @@ import org.ensime.fixture._
 import org.ensime.util._
 import org.scalatest.ParallelTestExecution
 import org.scalatest.tagobjects.Retryable
+import org.scalatest.concurrent.ScalaFutures
 
 import org.ensime.filewatcher._
 import scala.collection.immutable.Set
@@ -61,6 +62,12 @@ abstract class FileWatcherSpec extends EnsimeSpec
           withClassWatcher(dir) { watcher =>
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
+            val baseCreated: Fish = {
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
+              case _ => false
+            }
+
+            tk.fishForMessage(maxWait)(baseCreated)
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
@@ -122,6 +129,12 @@ abstract class FileWatcherSpec extends EnsimeSpec
       withTestKit { implicit tk =>
         withTempDir { dir =>
           withClassWatcher(dir) { watcher =>
+            val baseCreated: Fish = {
+              case BaseAdded(f) => new File(f.getURL.getFile) == dir
+              case _ => false
+            }
+
+            tk.fishForMessage(maxWait)(baseCreated)
 
             val foo = (dir / "foo.class")
             val bar = (dir / "b/bar.class")
