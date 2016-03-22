@@ -20,11 +20,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.implicitConversions
 
 trait FileChangeListener {
-  def fileAdded(f: FileObject): Unit
-  def fileRemoved(f: FileObject): Unit
-  def fileChanged(f: FileObject): Unit
-  def baseReCreated(f: FileObject): Unit = {}
-  def baseRemoved(f: FileObject): Unit = {}
+  def fileAdded(f: File): Unit
+  def fileRemoved(f: File): Unit
+  def fileChanged(f: File): Unit
+  def baseReCreated(f: File): Unit = {}
+  def baseRemoved(f: File): Unit = {}
 }
 
 trait Watcher {
