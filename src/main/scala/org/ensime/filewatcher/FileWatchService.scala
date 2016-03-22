@@ -100,6 +100,20 @@ class FileWatchService {
     }
 
   }
+  def notifyExisting(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
+    dir.listFiles.filter(f => f.isFile)
+      .foreach { file =>
+        {
+          log.debug(s"existing file ${file}")
+          notifyListeners(
+            file,
+            ENTRY_CREATE,
+            listeners.filter { _.treatExistingAsNew },
+            key
+          )
+        }
+      }
+  }
 
   def registerDir(dir: File, listeners: Set[WatcherListener]): Unit = {
     log.debug(s"register ${dir} with a watch service")
@@ -120,16 +134,9 @@ class FileWatchService {
       }
       log.debug(s"add ${observers.size} listeners to ${dir} ")
       observers foreach { WatchKeyManager.addObserver(key, _) }
+      observers foreach { _.watcherListener.baseReCreated(key) }
 
-      dir.listFiles.filter(f => f.isFile)
-        .foreach {
-          notifyListeners(
-            _,
-            ENTRY_CREATE,
-            listeners.filter { _.treatExistingAsNew },
-            key
-          )
-        }
+      notifyExisting(dir, listeners, key)
 
       if (WatchKeyManager.hasProxy(key)) {
         dir.listFiles.filter(f => (f.isDirectory || f.isFile))
@@ -187,19 +194,15 @@ class FileWatchService {
       closeWatchService()
 
       def processEvents(key: WatchKey) = {
-        //log.debug("start processing events for {}", keyToFile(key))
 
         for (event <- key.pollEvents) {
           val kind = event.kind
           val file = key.watchable.asInstanceOf[Path]
             .resolve(event.context.asInstanceOf[Path]).toFile
 
-          log.debug(s"event: ${kind} for ${file}")
-
           if (kind == ENTRY_CREATE
             && Files.isDirectory(file.toPath, LinkOption.NOFOLLOW_LINKS)
             && WatchKeyManager.hasRecursive(key)) {
-            log.debug(s"watch a subdirectory ${file}")
             watch(
               file,
               WatchKeyManager.recListeners(key)
@@ -207,30 +210,31 @@ class FileWatchService {
           }
 
           if (kind == ENTRY_CREATE) {
-            log.debug(s"maybeAdvanceProxy ${keyToFile(key)} ${file}")
             WatchKeyManager.maybeAdvanceProxy(key, file)
           }
 
-          // if (kind == ENTRY_DELETE && keyToFile(key) == file) {
-          //   log.debug(s"not running maybeRecoverFromDeletion ${keyToFile(key)} ${file}")
-          //   //maybeRecoverFromDeletion(key)
-          // }
           notifyListeners(file, kind, WatchKeyManager.nonProxyListeners(key), key)
         }
       }
 
-      def maybeRecoverFromDeletion(key: WatchKey) = {
+      def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
         if (WatchKeyManager.hasBase(key)
           || WatchKeyManager.hasBaseFile(key)
           || WatchKeyManager.hasProxy(key)) {
 
-          if (!key.mkdirs) {
-            log.error("Unable to re-create {} with parents", key)
+          if (!key.mkdirs && !key.exists) {
+            if (retry <= 3) {
+              Thread.sleep(20)
+              log.error("retry re-create {} with parents", keyToFile(key))
+              maybeRecoverFromDeletion(key, retry + 1)
+            }
+            log.error("Unable to re-create {} with parents", keyToFile(key))
           } else {
-            //log.debug("re-watch {}", keyToCanonicalPath(key))
             val listeners = WatchKeyManager.listeners(key)
             val baseListeners = WatchKeyManager.baseListeners(key)
+            val baseFileListeners = WatchKeyManager.baseFileListeners(key)
             listeners foreach { _.baseRemoved(key) }
+            baseFileListeners foreach { o => o.fileDeleted(o.base) }
             WatchKeyManager.removeKey(key)
             watch(key, listeners)
             baseListeners foreach { _.baseReCreated(key) }
@@ -268,28 +272,27 @@ class FileWatchService {
     }
   }
 
-  def spawnWatcher() = {
-    new Watcher() {
+  def spawnWatcher(): Watcher = {
+    spawnWatcher(UUID.randomUUID())
+  }
+
+  def spawnWatcher(uuid: UUID) = {
+    new Watcher(uuid) {
       val fileWatchService = self;
     }
   }
 
   private def notifyListeners(f: File, kind: Kind[_], listeners: Set[WatcherListener], key: WatchKey) = {
-    //log.trace("got {event} for {f}")
     if (kind == ENTRY_CREATE) {
-      //log.debug(s"detected ENTRY_CREATE ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileCreated(f) }
     }
     if (kind == ENTRY_MODIFY) {
-      //log.debug(s"detected ENTRY_MODIFY ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileModified(f) }
     }
     if (kind == ENTRY_DELETE) {
-      //log.debug(s"detected ENTRY_DELETE ${f} for ${keyToFile(key)}")
       listeners filter { _.isWatched(f) } foreach { _.fileDeleted(f) }
     }
     if (kind == OVERFLOW) {
-      //log.debug(s"detected OVERFLOW ${f} for ${keyToFile(key)}")
     }
   }
 
@@ -316,22 +319,22 @@ class FileWatchService {
   case class BaseObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override lazy val treatExistingAsNew = watcherListener.treatExistingAsNew
     override lazy val recursive = watcherListener.recursive
-    override val observerType = "BaseListener"
+    override val observerType = "BaseObserver"
   }
   case class BaseFileObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
-    val treatExistingAsNew = false
+    val treatExistingAsNew = true
     val recursive = false
-    override val observerType = "BaseFileListener"
+    override val observerType = "BaseFileObserver"
   }
   case class ProxyObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override val treatExistingAsNew = true
     val recursive = false
-    override val observerType = "ProxyListener"
+    override val observerType = "ProxyObserver"
   }
   case class BaseSubdirObserver(val watcherListener: WatcherListener) extends WatchKeyObserver {
     override lazy val treatExistingAsNew = watcherListener.treatExistingAsNew
     override lazy val recursive = watcherListener.recursive
-    override val observerType = "BaseSubdirListener"
+    override val observerType = "BaseSubdirObserver"
   }
 
   trait WatchKeyObserver {
@@ -428,6 +431,13 @@ class FileWatchService {
       } map { _.watcherListener }
     }
 
+    def baseFileListeners(key: WatchKey) = {
+      keymap getOrElse (key, Set()) filter {
+        case _: BaseFileObserver => true
+        case _ => false
+      } map { _.watcherListener }
+    }
+
     def proxyListeners(key: WatchKey) = {
       keymap getOrElse (key, Set()) filter {
         case _: ProxyObserver => true
@@ -508,9 +518,8 @@ class FileWatchService {
   }
 }
 
-trait Watcher {
+abstract class Watcher(val watcherId: UUID) {
   val fileWatchService: FileWatchService
-  val watcherId = UUID.randomUUID()
   def register(file: File, listeners: Set[WatcherListener]): Unit = {
     fileWatchService.watch(file, listeners)
   }
