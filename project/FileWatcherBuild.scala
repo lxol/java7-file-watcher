@@ -18,9 +18,9 @@ object FileWatcherBuild extends Build {
       name := "java7-file-watcher",
       javaOptions in Test ++= Seq("-Dlogback.configurationFile=logback-test.xml"),
       libraryDependencies ++= Sensible.testLibs() ++
-        Sensible.logback ++ Sensible.guava ++ Seq(
-          "org.apache.commons" % "commons-vfs2" % "2.0"
-        )
+        Sensible.logback ++ Sensible.guava // ++ Seq(
+        //   "org.apache.commons" % "commons-vfs2" % "2.0"
+        // )
     )
 
 }
