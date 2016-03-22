@@ -50,10 +50,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
     Thread.sleep(2000)
   }
 
-  def waitForOSX(): Unit = {
-    Thread.sleep(10001)
-  }
-  val maxWait = 11 seconds
+  // def waitForOSX(): Unit = {
+  //   Thread.sleep(40001)
+  // }
+  val maxWait = 41 seconds
 
   "FileWatcher" should "detect added files" taggedAs (Retryable) in
     withVFS { implicit vfs =>
@@ -242,7 +242,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             tk.fishForMessage(maxWait)(baseRemovedAndCreated)
             tk.fishForMessage(maxWait)(baseRemovedAndCreated)
-
+            Thread.sleep(1000)
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
 

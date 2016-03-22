@@ -100,6 +100,20 @@ class FileWatchService {
     }
 
   }
+  def notifyExisting(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
+    dir.listFiles.filter(f => f.isFile)
+      .foreach { file =>
+        {
+          log.debug(s"existing file ${file}")
+          notifyListeners(
+            file,
+            ENTRY_CREATE,
+            listeners.filter { _.treatExistingAsNew },
+            key
+          )
+        }
+      }
+  }
 
   def registerDir(dir: File, listeners: Set[WatcherListener]): Unit = {
     log.debug(s"register ${dir} with a watch service")
@@ -121,19 +135,20 @@ class FileWatchService {
       log.debug(s"add ${observers.size} listeners to ${dir} ")
       observers foreach { WatchKeyManager.addObserver(key, _) }
       observers foreach { _.watcherListener.baseReCreated(key) }
-
-      dir.listFiles.filter(f => f.isFile)
-        .foreach { file =>
-          {
-            log.debug(s"existing file ${file}")
-            notifyListeners(
-              file,
-              ENTRY_CREATE,
-              listeners.filter { _.treatExistingAsNew },
-              key
-            )
-          }
-        }
+      //Thread.sleep(100)
+      notifyExisting(dir, listeners, key)
+      // dir.listFiles.filter(f => f.isFile)
+      //   .foreach { file =>
+      //     {
+      //       log.debug(s"existing file ${file}")
+      //       notifyListeners(
+      //         file,
+      //         ENTRY_CREATE,
+      //         listeners.filter { _.treatExistingAsNew },
+      //         key
+      //       )
+      //     }
+      //   }
 
       if (WatchKeyManager.hasProxy(key)) {
         dir.listFiles.filter(f => (f.isDirectory || f.isFile))
@@ -229,7 +244,9 @@ class FileWatchService {
           } else {
             val listeners = WatchKeyManager.listeners(key)
             val baseListeners = WatchKeyManager.baseListeners(key)
+            val baseFileListeners = WatchKeyManager.baseFileListeners(key)
             listeners foreach { _.baseRemoved(key) }
+            baseFileListeners foreach { o => o.fileDeleted(o.base) }
             WatchKeyManager.removeKey(key)
             watch(key, listeners)
             baseListeners foreach { _.baseReCreated(key) }
@@ -422,6 +439,13 @@ class FileWatchService {
     def baseListeners(key: WatchKey) = {
       keymap getOrElse (key, Set()) filter {
         case _: BaseObserver => true
+        case _ => false
+      } map { _.watcherListener }
+    }
+
+    def baseFileListeners(key: WatchKey) = {
+      keymap getOrElse (key, Set()) filter {
+        case _: BaseFileObserver => true
         case _ => false
       } map { _.watcherListener }
     }
