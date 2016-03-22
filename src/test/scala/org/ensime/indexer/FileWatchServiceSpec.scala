@@ -103,7 +103,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
             }
             tk.fishForMessage(maxWait)(fooOrBarAdded)
             tk.fishForMessage(maxWait)(fooOrBarAdded)
-            waitForLinus()
+            //waitForLinus()
             foo.writeString("foo")
             bar.writeString("bar")
             val fooOrBarChanged: Fish = {
@@ -148,7 +148,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.delete() shouldBe true
             bar.delete() shouldBe true
-            waitForLinus()
+            //waitForLinus()
             val fooOrBarRemoved: Fish = {
               case Removed(f) => {
                 f == foo || f == bar
@@ -268,7 +268,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForLinus()
+            //waitForLinus()
             val fooOrBarAdded: Fish = {
               case Added(f) => {
                 f == foo || f == bar
@@ -296,7 +296,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForLinus()
+            //waitForLinus()
             val fooOrBarAdded: Fish = {
               case Added(f) => {
                 f == foo || f == bar
@@ -320,7 +320,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             foo.createWithParents() shouldBe true
             bar.createWithParents() shouldBe true
-            waitForLinus()
+            //waitForLinus()
             tk.fishForMessage(maxWait)(fooOrBarAdded)
             tk.fishForMessage(maxWait)(fooOrBarAdded)
 
@@ -340,6 +340,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
           withJarWatcher(jar) { watcher =>
             log.debug(s"detect changes to a file base ${jar}")
+            Thread.sleep(500) //time to register before testing the chnages
             jar.writeString("binks")
             val jarChanged: Fish = {
               case Changed(f) => f == jar
@@ -358,7 +359,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
         withTempDir { dir =>
           val root = (dir / "root")
           val jar = (root / "jar.jar")
-          waitForLinus()
+          //waitForLinus()
           jar.createWithParents() shouldBe true
 
           withJarWatcher(jar) { watcher =>
@@ -379,7 +380,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
         withTempDir { dir =>
           val jar = (dir / "jar.jar")
           withJarWatcher(jar) { watcher =>
-            waitForLinus()
+            //waitForLinus()
             jar.createWithParents() shouldBe true
             val jarAdded: Fish = {
               case Added(f) => f == jar
@@ -408,7 +409,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             jar.delete() shouldBe true
             log.debug(s"survive deleted a file ${jar}")
-            waitForLinus()
+            //waitForLinus()
 
             val jarRemoved: Fish = {
               case Removed(f) => f == jar
@@ -436,7 +437,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
           val jar = (dir / "parent" / "jar.jar")
           jar.createWithParents() shouldBe true
           withJarWatcher(jar) { watcher =>
-            waitForLinus()
+            //waitForLinus()
             dir.tree.reverse.foreach(_.delete())
             log.debug(s"deleted ${dir}")
             val jarRemoved: Fish = {
@@ -469,7 +470,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
             jar.createWithParents() shouldBe true
             //waitForOSX()
-            waitForLinus()
+            //waitForLinus()
             val jarAdded: Fish = {
               case Added(f) => f == jar
               case _ => false
@@ -487,14 +488,14 @@ abstract class FileWatcherSpec extends EnsimeSpec
 
   def withClassWatcher[T](base: File)(code: Watcher => T)(implicit vfs: EnsimeVFS, tk: TestKit) = {
     val w = createClassWatcher(base)
-    waitForLinus()
+    //waitForLinus()
     try code(w)
     finally w.shutdown()
   }
 
   def withJarWatcher[T](jar: File)(code: Watcher => T)(implicit vfs: EnsimeVFS, tk: TestKit) = {
     val w = createJarWatcher(jar)
-    waitForLinus()
+    //waitForLinus()
     try code(w)
     finally w.shutdown()
   }
