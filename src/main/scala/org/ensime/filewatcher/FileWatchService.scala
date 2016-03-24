@@ -105,12 +105,7 @@ class FileWatchService {
       .foreach { file =>
         {
           log.debug(s"existing file ${file}")
-          notifyListeners(
-            file,
-            ENTRY_CREATE,
-            listeners.filter { _.treatExistingAsNew },
-            key
-          )
+          listeners filter { _.treatExistingAsNew } filter { _.isWatched(file) } foreach { _.fileCreated(file) }
         }
       }
   }
@@ -213,7 +208,18 @@ class FileWatchService {
             WatchKeyManager.maybeAdvanceProxy(key, file)
           }
 
-          notifyListeners(file, kind, WatchKeyManager.nonProxyListeners(key), key)
+          val ls = WatchKeyManager.nonProxyListeners(key)
+          if (kind == ENTRY_CREATE) {
+            ls filter { _.isWatched(file) } foreach { _.fileCreated(file) }
+          }
+          if (kind == ENTRY_MODIFY) {
+            ls filter { _.isWatched(file) } foreach { _.fileModified(file) }
+          }
+          if (kind == ENTRY_DELETE) {
+            ls filter { _.isWatched(file) } foreach { _.fileDeleted(file) }
+          }
+          if (kind == OVERFLOW) {
+          }
         }
       }
 
@@ -272,27 +278,13 @@ class FileWatchService {
     }
   }
 
-  def spawnWatcher(): Watcher = {
+  def spawnWatcher(): Monitor = {
     spawnWatcher(UUID.randomUUID())
   }
 
   def spawnWatcher(uuid: UUID) = {
-    new Watcher(uuid) {
+    new Monitor(uuid) {
       val fileWatchService = self;
-    }
-  }
-
-  private def notifyListeners(f: File, kind: Kind[_], listeners: Set[WatcherListener], key: WatchKey) = {
-    if (kind == ENTRY_CREATE) {
-      listeners filter { _.isWatched(f) } foreach { _.fileCreated(f) }
-    }
-    if (kind == ENTRY_MODIFY) {
-      listeners filter { _.isWatched(f) } foreach { _.fileModified(f) }
-    }
-    if (kind == ENTRY_DELETE) {
-      listeners filter { _.isWatched(f) } foreach { _.fileDeleted(f) }
-    }
-    if (kind == OVERFLOW) {
     }
   }
 
@@ -518,7 +510,7 @@ class FileWatchService {
   }
 }
 
-abstract class Watcher(val watcherId: UUID) {
+abstract class Monitor(val watcherId: UUID) {
   val fileWatchService: FileWatchService
   def register(file: File, listeners: Set[WatcherListener]): Unit = {
     fileWatchService.watch(file, listeners)
@@ -529,14 +521,12 @@ abstract class Watcher(val watcherId: UUID) {
 }
 
 trait WatcherListener {
-  //val log = LoggerFactory.getLogger(getClass)
   val base: File
   val recursive: Boolean
   val extensions: scala.collection.Set[String]
   val treatExistingAsNew: Boolean
   val watcherId: UUID
 
-  def keyToFile(k: WatchKey): File = k.watchable().asInstanceOf[Path].toFile
   def isWatched(f: File) = {
     (extensions.exists(e => {
       f.getName.endsWith(e)
