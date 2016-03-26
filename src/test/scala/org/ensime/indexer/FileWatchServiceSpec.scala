@@ -38,10 +38,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
     with IsolatedTestKitFixture {
 
   // variant that watches a jar file
-  def createJarWatcher(jar: File)(implicit tk: TestKit): Watcher
+  def createJarWatcher(jar: File)(implicit tk: TestKit): Monitor
 
   // variant that recursively watches a directory of classes
-  def createClassWatcher(base: File)(implicit tk: TestKit): Watcher
+  def createClassWatcher(base: File)(implicit tk: TestKit): Monitor
 
   val maxWait = 11 seconds
 
@@ -417,14 +417,14 @@ abstract class FileWatcherSpec extends EnsimeSpec
   type -->[A, B] = PartialFunction[A, B]
   type Fish = PartialFunction[Any, Boolean]
 
-  def withClassWatcher[T](base: File)(code: Watcher => T)(implicit tk: TestKit) = {
+  def withClassWatcher[T](base: File)(code: Monitor => T)(implicit tk: TestKit) = {
     val w = createClassWatcher(base)
     Thread.sleep(2000)
     try code(w)
     finally w.shutdown()
   }
 
-  def withJarWatcher[T](jar: File)(code: Watcher => T)(implicit tk: TestKit) = {
+  def withJarWatcher[T](jar: File)(code: Monitor => T)(implicit tk: TestKit) = {
     val w = createJarWatcher(jar)
     Thread.sleep(2000)
     try code(w)
@@ -444,11 +444,11 @@ abstract class FileWatcherSpec extends EnsimeSpec
 }
 
 class FileWatchServiceSpec extends FileWatcherSpec {
-  override def createClassWatcher(base: File)(implicit tk: TestKit): Watcher = {
+  override def createClassWatcher(base: File)(implicit tk: TestKit): Monitor = {
     ClassWatcher.register(base, Set("class"), true, listeners)
   }
 
-  override def createJarWatcher(jar: File)(implicit tk: TestKit): Watcher =
+  override def createJarWatcher(jar: File)(implicit tk: TestKit): Monitor =
     JarWatcher.register(jar, Set("jar"), false, listeners)
 }
 trait TestListener {
