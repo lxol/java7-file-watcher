@@ -18,14 +18,22 @@ import scala.collection.immutable.Set
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 import java.io.File
+import scala.concurrent.ExecutionContext.Implicits.global
 
 sealed trait FileWatcherMessage
 
-case class Added(f: File) extends FileWatcherMessage
-case class Removed(f: File) extends FileWatcherMessage
-case class Changed(f: File) extends FileWatcherMessage
-case class BaseAdded(f: File) extends FileWatcherMessage
+case class Added(b: File, f: File) extends FileWatcherMessage
+case class Removed(b: File, f: File) extends FileWatcherMessage
+case class Changed(b: File, f: File) extends FileWatcherMessage
+
+case class BaseRegistered(f: File) extends FileWatcherMessage
 case class BaseRemoved(f: File) extends FileWatcherMessage
+case class BaseSubdirRemoved(b: File, f: File) extends FileWatcherMessage
+case class MissingBaseRegistered(f: File) extends FileWatcherMessage
+case class BaseSubdirRegistered(b: File, f: File) extends FileWatcherMessage
+case class ProxyRegistered(b: File, f: File) extends FileWatcherMessage
+
+case class ExistingFile(b: File, f: File) extends FileWatcherMessage
 
 /**
  * These tests are insanely flakey so everything is retryable. The
@@ -38,123 +46,75 @@ abstract class FileWatcherSpec extends EnsimeSpec
     with IsolatedTestKitFixture {
 
   // variant that watches a jar file
-  def createJarWatcher(jar: File)(implicit tk: TestKit): Monitor
+  def createJarWatcher(jar: File)(implicit tk: TestKit): Watcher
 
   // variant that recursively watches a directory of classes
-  def createClassWatcher(base: File)(implicit tk: TestKit): Monitor
+  def createClassWatcher(base: File)(implicit tk: TestKit): Watcher
 
-  val maxWait = 11 seconds
+  val maxWait = 20 seconds
 
-  "FileWatcher" should "detect added files" taggedAs (Retryable) in
+  "FileWatcher" should "detect added files" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"detect added files ${dir}")
         withClassWatcher(dir) { watcher =>
-          val foo = (dir / "foo.class")
-          val bar = (dir / "b/bar.class")
-          val baseCreated: Fish = {
-            case BaseAdded(f) => f == dir
-            case _ => false
-          }
-
-          tk.fishForMessage(maxWait)(baseCreated)
-
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
+          checkBase(dir, tk)
+          createFoo(dir, tk)
+          createBar(dir, tk)
         }
       }
     }
 
-  it should "detect added / changed files" taggedAs (Retryable) in
+  it should "detect added / changed files" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"detect added / changed files ${dir}")
         withClassWatcher(dir) { watcher =>
-          val foo = (dir / "foo.class")
-          val bar = (dir / "b/bar.class")
-
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          foo.isFile() shouldBe true
-          bar.isFile() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          foo.writeString("foo")
-          bar.writeString("bar")
-          val fooOrBarChanged: Fish = {
-            case Changed(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-
-          tk.fishForMessage(maxWait)(fooOrBarChanged)
-          tk.fishForMessage(maxWait)(fooOrBarChanged)
+          checkBase(dir, tk)
+          createFoo(dir, tk)
+          createBar(dir, tk)
+          changeFooBar(dir, tk)
         }
       }
     }
 
-  it should "detect added / removed files" taggedAs (Retryable) in
+  it should "detect added / removed files" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"detect added / removed files: ${dir}")
         withClassWatcher(dir) { watcher =>
-          val baseCreated: Fish = {
-            case BaseAdded(f) => f == dir
-            case _ => false
-          }
+          checkBase(dir, tk)
+          createFoo(dir, tk)
+          createBar(dir, tk)
 
-          tk.fishForMessage(maxWait)(baseCreated)
-
-          val foo = (dir / "foo.class")
-          val bar = (dir / "b/bar.class")
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-
-          foo.delete() shouldBe true
-          bar.delete() shouldBe true
-          val fooOrBarRemoved: Fish = {
-            case Removed(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarRemoved)
-          tk.fishForMessage(maxWait)(fooOrBarRemoved)
+          deleteFoo(dir, tk)
+          deleteBar(dir, tk)
         }
       }
     }
 
-  it should "detect removed base directory" taggedAs (Retryable) in
+  it should "detect removed base directory" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"detect removed base directory: ${dir}")
         withClassWatcher(dir) { watcher =>
+          checkBase(dir, tk)
 
-          dir.delete()
+          tk.system.scheduler.scheduleOnce(30 milli) {
+            log.debug(s"remove base ${dir}")
+            dir.delete()
+          }
 
           val baseRemovedAndCreated: Fish = {
-            case BaseRemoved(f) => f == dir
-            case BaseAdded(f) => f == dir
-            case _ => false
+            case BaseRemoved(f) => {
+              log.debug(s"Detected BaseRemoved ${f} for ${dir} base")
+              f == dir
+            }
+            case MissingBaseRegistered(f) => {
+              log.debug(s"Detected MissingBaseRegistered ${f} for ${dir} base")
+              f == dir
+            }
+            case e => { logEvent("Bad ", dir, e); false }
           }
 
           tk.fishForMessage(maxWait)(baseRemovedAndCreated)
@@ -163,19 +123,26 @@ abstract class FileWatcherSpec extends EnsimeSpec
       }
     }
 
-  it should "detect removed parent base directory" taggedAs (Retryable) in
+  it should "detect removed parent base directory" in
     withTestKit { implicit tk =>
       val parent = Files.createTempDir().canon
       val dir = parent / "base"
       dir.mkdirs()
+      log.debug(s"detect removed parent base directory ${dir}")
       try {
+
         withClassWatcher(dir) { watcher =>
-          dir.tree.reverse.foreach(_.delete())
-          parent.delete()
+          checkBase(dir, tk)
+
+          tk.system.scheduler.scheduleOnce(50 milli) {
+            log.debug(s"Remove parent base ${parent} ${dir} base}")
+            parent.tree.reverse.foreach(_.delete())
+          }
+
           val baseRemovedAndCreated: Fish = {
             case BaseRemoved(f) => f == dir
-            case BaseAdded(f) => f == dir
-            case _ => false
+            case MissingBaseRegistered(f) => f == dir
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(baseRemovedAndCreated)
           tk.fishForMessage(maxWait)(baseRemovedAndCreated)
@@ -184,125 +151,143 @@ abstract class FileWatcherSpec extends EnsimeSpec
       } finally parent.tree.reverse.foreach(_.delete())
     }
 
-  it should "survive deletion of the watched directory" taggedAs (Retryable) in
+  it should "survive deletion of the watched directory" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"survive deletion of the watched directory: ${dir}")
         withClassWatcher(dir) { watcher =>
-          val foo = (dir / "foo.class")
-          val bar = (dir / "b/bar.class")
-          Thread.sleep(1000)
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              val addedFile = f
-              addedFile == foo || addedFile == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          Thread.sleep(1000)
-          dir.tree.reverse.foreach(_.delete())
+          checkBase(dir, tk)
+          createFoo(dir, tk)
+          createBar(dir, tk)
 
-          val baseRemovedAndCreated: Fish = {
-            case BaseRemoved(f) => f == dir
-            case BaseAdded(f) => f == dir
-            case _ => false
+          tk.system.scheduler.scheduleOnce(50 milli) {
+            log.debug(s"remove ${dir}")
+            dir.tree.reverse.foreach(_.delete())
           }
-          tk.fishForMessage(maxWait)(baseRemovedAndCreated)
-          tk.fishForMessage(maxWait)(baseRemovedAndCreated)
-          Thread.sleep(1000)
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
 
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
+          deleteBase(dir, dir, tk)
+
+          createFoo(dir, tk)
+          createBar(dir, tk)
         }
       }
     }
 
-  it should "be able to start up from a non-existent directory" taggedAs (Retryable) in
+  it should "be able to start up from a non-existent directory" in
     withTestKit { implicit tk =>
       val root = Files.createTempDir().canon
       val dir = (root / "dir")
+      log.debug(s"be able to start up from a non-existent directory: ${dir}")
       dir.delete()
       try {
+        log.debug(s"be able to start up from a non-existent directory: ${dir}")
         withClassWatcher(dir) { watcher =>
+
+          val proxyRegistered: Fish = {
+            case ProxyRegistered(b, f) => {
+              b == dir && f == root
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+          tk.fishForMessage(maxWait)(proxyRegistered)
+
           val foo = (dir / "foo.class")
           val bar = (dir / "b/bar.class")
 
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              f == foo || f == bar
+          tk.system.scheduler.scheduleOnce(30 milli) { foo.createWithParents() shouldBe true }
+
+          val missingBaseAndFoo: Fish = {
+            case MissingBaseRegistered(f) => f == dir
+            case ExistingFile(b, f) => {
+              b == dir && f == foo
             }
-            case _ => false
+            case Added(b, f) => {
+              b == dir && f == foo
+            }
+            case e => { logEvent("Bad ", dir, e); false }
           }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
+          tk.fishForMessage(maxWait)(missingBaseAndFoo)
+          tk.fishForMessage(maxWait)(missingBaseAndFoo)
+
+          tk.system.scheduler.scheduleOnce(30 milli) { bar.createWithParents() shouldBe true }
+
+          val subdirAndBar: Fish = {
+            case BaseSubdirRegistered(b, f) => b == dir && f == bar.getParentFile
+            case ExistingFile(b, f) => {
+              b == dir && f == bar
+            }
+            case Added(b, f) => {
+              b == dir && f == bar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+
+          tk.fishForMessage(maxWait)(subdirAndBar)
+          tk.fishForMessage(maxWait)(subdirAndBar)
         }
       } finally dir.tree.reverse.foreach(_.delete())
     }
 
-  it should "survive removed parent base directory and recreated base" taggedAs (Retryable) in
+  it should "survive removed parent base directory and recreated base" in
     withTestKit { implicit tk =>
 
-      val parent = Files.createTempDir().canon
+      val root = Files.createTempDir().canon
+      val parent = root / "parent"
       val dir = parent / "base"
+      log.debug(s"survive removed parent base directory and recreated base. ${dir}")
       dir.mkdirs()
       try {
         withClassWatcher(dir) { watcher =>
           val foo = (dir / "foo.class")
           val bar = (dir / "b/bar.class")
-          Thread.sleep(1000)
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          val fooOrBarAdded: Fish = {
-            case Added(f) => {
-              f == foo || f == bar
-            }
-            case _ => false
-          }
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          Thread.sleep(1000)
-          dir.tree.reverse.foreach(_.delete())
-
-          parent.delete()
-          val baseRemovedAndCreated: Fish = {
-            case BaseRemoved(f) => f == dir
-            case BaseAdded(f) => f == dir
-            case _ => false
+          tk.ignoreMsg {
+            case Changed(b, f) => true // Windows only
+            case Removed(b, f) => f == foo || f == bar // Windows as well
           }
 
-          tk.fishForMessage(maxWait)(baseRemovedAndCreated)
-          tk.fishForMessage(maxWait)(baseRemovedAndCreated)
-          Thread.sleep(1000)
-          foo.createWithParents() shouldBe true
-          bar.createWithParents() shouldBe true
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
-          tk.fishForMessage(maxWait)(fooOrBarAdded)
+          checkBase(dir, tk)
+          createFoo(dir, tk)
+          createBar(dir, tk)
+
+          deleteBase(root, dir, tk)
+
+          createFoo(dir, tk)
+          createBar(dir, tk)
 
         }
       } finally dir.tree.reverse.foreach(_.delete())
     }
 
   //////////////////////////////////////////////////////////////////////////////
-  it should "detect changes to a file base" taggedAs (Retryable) in
+  it should "detect changes to a file base" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
-
+        log.debug(s"detect changes to a file base ${dir}")
         val jar = (dir / "jar.jar")
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
-          Thread.sleep(500) //time to register before testing the chnages
-          jar.writeString("binks")
+          checkBase(jar, tk)
+
+          val fishForExistingJar: Fish = {
+            case ExistingFile(b, f) => {
+              b == jar && f == jar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+
+          tk.fishForMessage(maxWait)(fishForExistingJar)
+
+          tk.system.scheduler.scheduleOnce(1000 milli) {
+            jar.writeString("binks")
+          }
+
           val jarChanged: Fish = {
-            case Changed(f) => f == jar
-            case _ => false
+            case Changed(b, f) => {
+              log.debug(s"Detected Changed ${b}, ${f} ")
+              b == jar && f == jar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarChanged)
 
@@ -310,201 +295,478 @@ abstract class FileWatcherSpec extends EnsimeSpec
       }
     }
 
-  it should "detect removal of a file base" taggedAs (Retryable) in
+  it should "detect removal of a file base" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
+        log.debug(s"detect removal of a file base. ${dir}")
         val root = (dir / "root")
         val jar = (root / "jar.jar")
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
-          jar.delete()
+          checkBase(jar, tk)
+          val fishForExistingJar: Fish = {
+            case ExistingFile(b, f) => {
+              b == jar && f == jar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+
+          tk.fishForMessage(maxWait)(fishForExistingJar)
+
+          tk.system.scheduler.scheduleOnce(30 milli) {
+            jar.delete()
+          }
           val jarRemoved: Fish = {
-            case Removed(f) => f == jar
-            case _ => false
+            case BaseRemoved(f) => f == jar
+            case Removed(b, f) => b == jar && f == jar
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarRemoved)
         }
       }
     }
 
-  it should "be able to start up from a non-existent base file" taggedAs (Retryable) in
+  it should "be able to start up from a non-existent base file" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
         val jar = (dir / "jar.jar")
+        log.debug(s"be able to start up from a non-existent base file. ${jar}")
         withJarWatcher(jar) { watcher =>
+          //Thread.sleep(100)
+          val proxyRegistered: Fish = {
+            case ProxyRegistered(b, f) => {
+              log.debug(s"Detected ProxyRegistered ${b} ${f}, ${jar} jar")
+              b == jar && f == dir
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+          tk.fishForMessage(maxWait)(proxyRegistered)
+
           jar.createWithParents() shouldBe true
+
           val jarAdded: Fish = {
-            case Added(f) => f == jar
-            case _ => false
+            case MissingBaseRegistered(f) => f == jar
+            case Added(b, f) => false
+            case ExistingFile(b, f) => false
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarAdded)
         }
       }
     }
 
-  it should "survive removal of a file base" taggedAs (Retryable) in
+  it should "survive removal of a file base" in
     withTestKit { implicit tk =>
       withTempDir { root =>
         val dir = (root / "base")
         val jar = (dir / "jar.jar")
-
+        log.debug(s"survive removal of a file base ${jar}")
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
+          checkBase(jar, tk)
+
+          val fishForExistingJar: Fish = {
+            case ExistingFile(b, f) => {
+              b == jar && f == jar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+          tk.fishForMessage(maxWait)(fishForExistingJar)
 
           jar.delete() shouldBe true
 
           val jarRemoved: Fish = {
-            case Removed(f) => f == jar
-            case _ => false
+            case BaseRemoved(f) => f == jar
+            case Removed(b, f) => b == jar && f == jar
+            case ProxyRegistered(b, f) => b == jar && f == dir
+            case e => { logEvent("Bad ", dir, e); false }
           }
+          tk.fishForMessage(maxWait)(jarRemoved)
+          tk.fishForMessage(maxWait)(jarRemoved)
           tk.fishForMessage(maxWait)(jarRemoved)
 
           jar.writeString("binks")
           jar.exists shouldBe true
           val jarAdded: Fish = {
-            case Added(f) => f == jar
-            case _ => false
+            case MissingBaseRegistered(f) => f == jar
+            case Added(b, f) => false
+            case ExistingFile(b, f) => false
+
+            case Changed(b, f) => false
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarAdded)
         }
       }
     }
 
-  it should "survive removal of a parent of a file base" taggedAs (Retryable) in
+  it should "survive removal of a parent of a file base" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
-        val jar = (dir / "parent" / "jar.jar")
+        log.debug(s"survive removal of a parent of a file base. ${dir}")
+        val root = (dir / "root")
+        val jar = (root / "parent" / "jar.jar")
         jar.createWithParents() shouldBe true
         withJarWatcher(jar) { watcher =>
-          dir.tree.reverse.foreach(_.delete())
+          checkBase(jar, tk)
+          val fishForExistingJar: Fish = {
+            case ExistingFile(b, f) => {
+              b == jar && f == jar
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+          tk.fishForMessage(maxWait)(fishForExistingJar)
+
+          root.tree.reverse.foreach(_.delete())
+
           val jarRemoved: Fish = {
-            case Removed(f) => f == jar
-            case _ => false
+            case BaseRemoved(f) => {
+              log.debug(s"Detected BaseRemoved ${f} base ${jar}")
+              f == jar
+            }
+            case Removed(b, f) => {
+              log.debug(s"Detected Removed ${b} ${f} base ${jar}")
+              b == jar && f == jar
+            }
+            case ProxyRegistered(b, f) => {
+              log.debug(s"Detected ProxyRegistered ${b} ${f} base ${jar}")
+              false
+            } // ignore
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarRemoved)
+          tk.fishForMessage(maxWait)(jarRemoved)
+
           jar.createWithParents() shouldBe true
+
           val jarAdded: Fish = {
-            case Added(f) => f == jar
-            case _ => false
+            case MissingBaseRegistered(f) => f == jar
+            case Added(b, f) => false
+            case ExistingFile(b, f) => false
+            case ProxyRegistered(b, f) => {
+              log.debug(s"Detected ProxyRegistered ${b} ${f} base ${jar}")
+              false
+            } // ignore
+
+            case e => { logEvent("Bad ", dir, e); false }
           }
           tk.fishForMessage(maxWait)(jarAdded)
-
         }
       }
     }
-
-  it should "be able to start up from a non-existent grandparent of a base file" taggedAs (Retryable) in
+  it should "be able to start up from a non-existent grandparent of a base file" in
     withTestKit { implicit tk =>
       withTempDir { dir =>
-        val jar = (dir / "top" / "grand" / "parent" / "jar.jar")
+        val top = (dir / "top")
+        val grand = (top / "grand")
+        val parent = (grand / "parent")
+        val jar = (parent / "jar.jar")
+        log.debug(s"be able to start up from a non-existent grandparent of a base file. ${jar}")
         (dir / "top").tree.reverse.foreach(_.delete())
         withJarWatcher(jar) { watcher =>
+          val proxyDirRegistered: Fish = {
+            case ProxyRegistered(b, f) => {
+              log.debug(s"Detected ProxyRegistered ${b} ${f}, ${jar} jar")
+              b == jar && f == dir
+            }
+            case e => { logEvent("Bad ", dir, e); false }
+          }
+          tk.fishForMessage(maxWait)(proxyDirRegistered)
 
           jar.createWithParents() shouldBe true
-          val jarAdded: Fish = {
-            case Added(f) => f == jar
-            case _ => false
+
+          val missingBaseRegistered: Fish = {
+            case ProxyRegistered(b, f) => {
+              log.debug(s"Detected ProxyRegistered ${b} ${f}, ${jar} jar")
+              false
+
+            }
+            case ExistingFile(b, f) => false
+            case MissingBaseRegistered(f) => f == jar
+            case e => { logEvent("Bad ", dir, e); false }
           }
-          tk.fishForMessage(maxWait)(jarAdded)
+          tk.fishForMessage(maxWait)(missingBaseRegistered)
 
         }
       }
     }
 
+  def checkBase(dir: File, tk: TestKit) = {
+    val baseCreated: Fish = {
+      case BaseRegistered(f) => f == dir
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+    tk.fishForMessage(maxWait)(baseCreated)
+  }
+
+  def createFoo(dir: File, tk: TestKit) = {
+    val foo = (dir / "foo.class")
+    tk.system.scheduler.scheduleOnce(30 milli) {
+      log.debug(s"created ${foo}")
+      foo.createWithParents() shouldBe true
+      foo.exists shouldBe true
+    }
+    val fishFoo: Fish = {
+      case ExistingFile(b, f) => {
+        log.debug(s"Detected ExistingFile ${b} ${f}, base: ${dir}")
+        b == dir && f == foo
+      }
+      case Added(b, f) => {
+        log.debug(s"Detected Added ${b} ${f}, base: ${dir}")
+        b == dir && f == foo
+      }
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+    tk.fishForMessage(maxWait)(fishFoo)
+  }
+
+  def createBar(dir: File, tk: TestKit) = {
+    val bar = (dir / "b/bar.class")
+
+    tk.system.scheduler.scheduleOnce(30 milli) {
+      log.debug(s"created ${bar}")
+      bar.createWithParents() shouldBe true
+      bar.exists shouldBe true
+    }
+    val fishBar: Fish = {
+      case BaseSubdirRegistered(b, f) => {
+        log.debug(s"Detected BaseSubdirRegistered ${b} ${f}, base: ${dir}")
+        b == dir && f == bar.getParentFile
+      }
+      case ExistingFile(b, f) => {
+        log.debug(s"Detected ExistingFile ${b} ${f}, base: ${dir}")
+        b == dir && f == bar
+      }
+      case Added(b, f) => {
+        log.debug(s"Detected Added ${b} ${f}, base: ${dir}")
+        b == dir && f == bar
+      }
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+    tk.fishForMessage(maxWait)(fishBar)
+    tk.fishForMessage(maxWait)(fishBar)
+  }
+
+  def changeFooBar(dir: File, tk: TestKit) = {
+    val foo = (dir / "foo.class")
+    val bar = (dir / "b/bar.class")
+    tk.system.scheduler.scheduleOnce(30 milli) {
+      log.debug(s"changed ${foo}")
+      foo.writeString("foo")
+      log.debug(s"changed ${bar}")
+      bar.writeString("bar")
+    }
+    val fishFooBarChange: Fish = {
+      case Changed(b, f) => {
+        log.debug(s"Detected Changed ${b} ${f}, base: ${dir}")
+        b == dir && (f == foo || f == bar)
+      }
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+
+    tk.fishForMessage(maxWait)(fishFooBarChange)
+    tk.fishForMessage(maxWait)(fishFooBarChange)
+  }
+
+  def deleteFoo(dir: File, tk: TestKit) = {
+    val foo = (dir / "foo.class")
+    tk.system.scheduler.scheduleOnce(30 milli) {
+      log.debug(s"deleted ${foo}")
+      foo.delete() shouldBe true
+    }
+    val fishFooRemoved: Fish = {
+      case Removed(b, f) => {
+        log.debug(s"Detected Removed ${b} ${f}, base: ${dir}")
+        b == dir && f == foo
+      }
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+    tk.fishForMessage(maxWait)(fishFooRemoved)
+  }
+
+  def deleteBar(dir: File, tk: TestKit) = {
+    val bar = (dir / "b/bar.class")
+    tk.system.scheduler.scheduleOnce(30 milli) {
+      log.debug(s"deleted ${bar}")
+      bar.delete() shouldBe true
+    }
+    val fishBarRemoved: Fish = {
+      case Removed(b, f) => {
+        log.debug(s"Detected Removed ${b} ${f}, base: ${dir}")
+        b == dir && f == bar
+      }
+      case e => { logEvent("Bad ", dir, e); false }
+    }
+    tk.fishForMessage(maxWait)(fishBarRemoved)
+
+  }
+
+  def deleteBase(root: File, base: File, tk: TestKit) = {
+    tk.system.scheduler.scheduleOnce(50 milli) {
+      log.debug(s"remove ${base}")
+      root.tree.reverse.foreach(_.delete())
+    }
+    val fishBaseRemovedAndCreated: Fish = {
+      case BaseRemoved(f) => {
+        log.debug(s"Detected BaseRemoved ${f} base ${base}")
+        f == base
+      }
+      case Removed(b, f) => {
+        log.debug(s"Detected Removed ${b} ${f} base ${base}. IGNORE as OS X doesn't detect it.")
+        false
+      }
+      case MissingBaseRegistered(f) => {
+        log.debug(s"Detected MissingBaseRegistered ${f} base ${base}")
+        f == base
+      }
+      case e => { logEvent("Bad ", base, e); false }
+    }
+    tk.fishForMessage(maxWait)(fishBaseRemovedAndCreated)
+    tk.fishForMessage(maxWait)(fishBaseRemovedAndCreated)
+
+  }
   //////////////////////////////////////////////////////////////////////////////
   type -->[A, B] = PartialFunction[A, B]
   type Fish = PartialFunction[Any, Boolean]
 
-  def withClassWatcher[T](base: File)(code: Monitor => T)(implicit tk: TestKit) = {
+  def withClassWatcher[T](base: File)(code: Watcher => T)(implicit tk: TestKit) = {
     val w = createClassWatcher(base)
-    Thread.sleep(2000)
     try code(w)
     finally w.shutdown()
+
   }
 
-  def withJarWatcher[T](jar: File)(code: Monitor => T)(implicit tk: TestKit) = {
+  def withJarWatcher[T](jar: File)(code: Watcher => T)(implicit tk: TestKit) = {
     val w = createJarWatcher(jar)
-    Thread.sleep(2000)
     try code(w)
     finally w.shutdown()
   }
 
-  def listeners(implicit tk: TestKit) = Set(
-    new TestListener {
-      def fileAdded(f: File): Unit = { tk.testActor ! Added(f) }
-      def fileRemoved(f: File): Unit = { tk.testActor ! Removed(f) }
-      def fileChanged(f: File): Unit = { tk.testActor ! Changed(f) }
-      override def baseReCreated(f: File): Unit = { tk.testActor ! BaseAdded(f) }
-      override def baseRemoved(f: File): Unit = { tk.testActor ! BaseRemoved(f) }
+  def logEvent(typ: String, base: File, e: Any) = e match {
+    case Added(b: File, f: File) => log.debug(s"${typ} Added ${b}, ${f} base: ${base}")
+    case Removed(b: File, f: File) => log.debug(s"${typ} Removed ${b}, ${f} base: ${base}")
+    case Changed(b: File, f: File) => log.debug(s"${typ} Changed ${b}, ${f} base: ${base}")
+    case BaseRegistered(f: File) => log.debug(s"${typ} BaseRegistered ${f} base: ${base}")
+    case BaseRemoved(f: File) => log.debug(s"${typ} BaseRemoved ${f} base: ${base}")
+    case BaseSubdirRemoved(b: File, f: File) => log.debug(s"${typ} BaseSubdirRemoved ${b} ${f} base: ${base}")
+    case MissingBaseRegistered(f: File) => log.debug(s"${typ} MissingBaseRegistered ${f} base: ${base}")
+    case BaseSubdirRegistered(b: File, f: File) => log.debug(s"${typ} MissingSubdirRegistered ${b} ${f} base: ${base}")
+    case ProxyRegistered(b: File, f: File) => log.debug(s"${typ} ProxyRegistered ${b} ${f} base: ${base}")
+    case ExistingFile(b: File, f: File) => log.debug(s"${typ} ExistingFile ${b} ${f} base: ${base}")
+    case _ => log.debug(s"${typ} Unknown event.  base: ${base}")
+  }
+
+  object WatcherListener {
+    def apply(
+      b: File,
+      r: Boolean,
+      e: Set[String],
+      w: UUID
+    )(implicit tk: TestKit): WatcherListener = {
+      new WatcherListener {
+        val base: File = b
+        val recursive: Boolean = r
+        val extensions: Set[String] = e
+        val watcherId: UUID = w
+
+        override def fileCreated(f: File): Unit = {
+          log.debug(s"event: fileCreated ${f} ${base} base")
+          tk.testActor ! Added(base, f)
+        }
+        override def fileDeleted(f: File): Unit = {
+          log.debug(s"event: fileDeleted ${f} ${base} base")
+          tk.testActor ! Removed(base, f)
+        }
+        override def fileModified(f: File): Unit = {
+          log.debug(s"event: fileModified ${f} ${base} base")
+          tk.testActor ! Changed(base, f)
+        }
+
+        override def baseRegistered(): Unit = {
+          log.debug(s"event: baseRegistered ${base} ")
+          tk.testActor ! BaseRegistered(base)
+        }
+        override def baseRemoved(): Unit = {
+          log.debug(s"event: baseRemoved ${base}")
+          tk.testActor ! BaseRemoved(base)
+        }
+        override def baseSubdirRemoved(f: File): Unit = {
+          log.debug(s"event: baseSubdirRemoved ${f} ${base} base")
+          tk.testActor ! BaseSubdirRemoved(base, f)
+        }
+        override def missingBaseRegistered(): Unit = {
+          log.debug(s"event: missingBaseRegistered ${base} ")
+          tk.testActor ! MissingBaseRegistered(base)
+        }
+
+        override def baseSubdirRegistered(f: File): Unit = {
+          log.debug(s"event: baseSubdirRegistered ${f} ${base} base")
+          tk.testActor ! BaseSubdirRegistered(base, f)
+        }
+        override def proxyRegistered(f: File): Unit = {
+          log.debug(s"event: proxyRegistered ${f} ${base} base")
+          tk.testActor ! ProxyRegistered(base, f)
+        }
+
+        override def existingFile(f: File): Unit = {
+          log.debug(s"event: existingFile ${f} ${base} base")
+          tk.testActor ! ExistingFile(base, f)
+        }
+      }
     }
-  )
+  }
 
 }
 
 class FileWatchServiceSpec extends FileWatcherSpec {
-  override def createClassWatcher(base: File)(implicit tk: TestKit): Monitor = {
-    ClassWatcher.register(base, Set("class"), true, listeners)
+  override def createClassWatcher(base: File)(implicit tk: TestKit): Watcher = {
+    val watcherId = UUID.randomUUID()
+    ClassWatchService.spawnWatcher(
+      watcherId,
+      base,
+      Set(
+        WatcherListener(
+          base,
+          true,
+          Set("class"),
+          watcherId
+        )
+      )
+    )
   }
 
-  override def createJarWatcher(jar: File)(implicit tk: TestKit): Monitor =
-    JarWatcher.register(jar, Set("jar"), false, listeners)
-}
-trait TestListener {
-  def fileAdded(f: File): Unit
-  def fileRemoved(f: File): Unit
-  def fileChanged(f: File): Unit
-  def baseReCreated(f: File): Unit = {}
-  def baseRemoved(f: File): Unit = {}
+  override def createJarWatcher(jar: File)(implicit tk: TestKit): Watcher = {
+    val watcherId = UUID.randomUUID()
+    JarWatchService.spawnWatcher(
+      watcherId,
+      jar,
+      Set(
+        WatcherListener(
+          jar,
+          true,
+          Set("jar"),
+          watcherId
+        )
+      )
+    )
+  }
 }
 
-object JarWatcher extends BaseWatcher
-object ClassWatcher extends BaseWatcher
+object JarWatchService extends BaseWatcher
+object ClassWatchService extends BaseWatcher
 
 class BaseWatcher extends SLF4JLogging {
   val fileWatchService: FileWatchService = new FileWatchService
-  val testWatcher = fileWatchService.spawnWatcher()
-  def register(
-    baseFile: File,
-    selector: Set[String],
-    rec: Boolean,
-    listeners: Set[TestListener]
-  ) = {
-    log.debug(s"watching ${baseFile}")
-    val s = listeners.map {
-      l: TestListener =>
-        new WatcherListener() {
-          override val base = baseFile
-          override val recursive = rec
-          override val extensions = selector
-          override val treatExistingAsNew = true
-          override val watcherId = testWatcher.watcherId
 
-          override def fileCreated(f: File) = {
-            log.debug(s"fileAdded ${f}")
-            l.fileAdded(f)
-          }
-          override def fileDeleted(f: File) = {
-            log.debug(s"fileDeleted ${f}")
-            l.fileRemoved(f)
-          }
-          override def fileModified(f: File) = {
-            log.debug(s"fileModified ${f}")
-            l.fileChanged(f)
-          }
-          override def baseReCreated(f: File) = {
-            log.debug(s"baseReCreated ${f}")
-            l.baseReCreated(f)
-          }
-          override def baseRemoved(f: File) = {
-            log.debug(s"baseRemoved ${f}")
-            l.baseRemoved(f)
-          }
-        }
-    }
-    testWatcher.register(baseFile, s.toSet)
-    testWatcher
+  def spawnWatcher(
+    watcherId: UUID,
+    baseFile: File,
+    listeners: Set[WatcherListener]
+  ) = {
+    //log.debug(s"watching ${baseFile} watcherID: ${testWatcher.watcherId}")
+    fileWatchService.spawnWatcher(watcherId, baseFile, listeners)
   }
 }
 
@@ -512,7 +774,7 @@ package object file {
   implicit val DefaultCharset: Charset = Charset.defaultCharset()
   /**
    * WARNING: do not create symbolic links in the temporary directory
-   * or the cleanup script will exit the sandbox and start deleting
+   * or the cleanup script will exit the sandbox and start deleting //
    * other files.
    */
   def withTempDir[T](a: File => T): T = {
