@@ -194,7 +194,7 @@ class FileWatchService {
             processEvents(key)
             // Windows can not survive removal of parent base directory
             // without delay
-            Thread.sleep(2)
+            Thread.sleep(50)
             if (!key.reset) {
               maybeRecoverFromDeletion(key)
             }
