@@ -194,9 +194,11 @@ class FileWatchService {
             processEvents(key)
             // Windows can not survive removal of parent base directory
             // without delay
-            Thread.sleep(50)
+
             if (!key.reset || !(keyToFile(key).exists)) {
+              log.debug("may be recover from deletion", keyToFile(key))
               maybeRecoverFromDeletion(key)
+              Thread.sleep(50)
             }
           }
           case Failure(e) => {
@@ -261,7 +263,7 @@ class FileWatchService {
         if (WatchKeyManager.hasBase(key)
           || WatchKeyManager.hasBaseFile(key)
           || WatchKeyManager.hasProxy(key)) {
-
+          log.debug("recover from deletion {}", keyToFile(key))
           if (!key.mkdirs && !key.exists) {
             if (retry <= 3) {
               Thread.sleep(20)
