@@ -290,7 +290,7 @@ class FileWatchService {
             case None => log.warn(s"can not find a parent key")
           }
         }
-      }
+      }n
       def continueMonitoring() = {
         monitorThread match {
           case Some(t) => if (t.isInterrupted) {
@@ -579,7 +579,7 @@ class FileWatchService {
       keymap.keys.foldLeft(0) { (a, _) => a + 1 }
     }
     def keyFromFile(f: File): Option[WatchKey] = {
-      keymap.keys.find { k => keyToFile(k) == f.getAbsolutePath }
+      keymap.keys.find { k => keyToFile(k).getAbsolutePath == f.getAbsolutePath }
     }
   }
 }
