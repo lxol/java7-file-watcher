@@ -290,7 +290,7 @@ class FileWatchService {
             case None => log.warn(s"can not find a parent key")
           }
         }
-      }n
+      }
       def continueMonitoring() = {
         monitorThread match {
           case Some(t) => if (t.isInterrupted) {
