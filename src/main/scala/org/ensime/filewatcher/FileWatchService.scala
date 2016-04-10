@@ -196,7 +196,7 @@ class FileWatchService {
             // without delay
 
             if (!key.reset) {
-              log.debug("may be recover from deletion", keyToFile(key))
+              log.debug("may be recover from deletion {}", keyToFile(key))
               maybeRecoverFromDeletion(key)
               //Thread.sleep(50)
             }
@@ -261,7 +261,7 @@ class FileWatchService {
 
       def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
         if (WatchKeyManager.hasBase(key)
-          //|| WatchKeyManager.hasBaseFile(key)
+          || WatchKeyManager.hasBaseFile(key)
           || WatchKeyManager.hasProxy(key)) {
           log.debug("recover from deletion {}", keyToFile(key))
           if (!key.mkdirs && !key.exists) {
@@ -286,7 +286,21 @@ class FileWatchService {
             case Some(p) => if (!p.reset) {
               log.debug(s"may be recover parent ${keyToFile(p)}")
               maybeRecoverFromDeletion(p, 3)
+            } else {
+              if (key.exists) {
+                log.debug(s"key is valide and dir exists ${keyToFile(p)}")
+              } else {
+                log.debug(s"key is valid but dir doesn't exist ${keyToFile(p)}")
+
+                if (retry <= 10) {
+                  Thread.sleep(50)
+                  log.debug(s"retry ${retry} ${keyToFile(p)}")
+                  maybeRecoverFromDeletion(p, retry + 1)
+                }
+
+              }
             }
+
             case None => log.warn(s"can not find a parent key")
           }
         }
