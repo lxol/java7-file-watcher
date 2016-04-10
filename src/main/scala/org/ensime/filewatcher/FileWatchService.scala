@@ -192,14 +192,10 @@ class FileWatchService {
         Try { watchService.take() } match {
           case Success(key) => {
             processEvents(key)
-            // Windows can not survive removal of parent base directory
-            // without delay
-
-            if (!key.reset) {
-              log.debug("may be recover from deletion {}", keyToFile(key))
-              maybeRecoverFromDeletion(key)
-              //Thread.sleep(50)
-            }
+            //if (!key.reset) {
+            log.debug("may be recover from deletion {}", keyToFile(key))
+            maybeRecoverFromDeletion(key)
+            //}
           }
           case Failure(e) => {
             log.error("unexpected WatchService take error. {}", e)
@@ -260,48 +256,65 @@ class FileWatchService {
       }
 
       def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
-        if (WatchKeyManager.hasBase(key)
-          || WatchKeyManager.hasBaseFile(key)
-          || WatchKeyManager.hasProxy(key)) {
-          log.debug("recover from deletion {}", keyToFile(key))
-          if (!key.mkdirs && !key.exists) {
-            if (retry <= 3) {
-              Thread.sleep(20)
-              log.error("retry re-create {} with parents", keyToFile(key))
-              maybeRecoverFromDeletion(key, retry + 1)
-            }
-            log.error("Unable to re-create {} with parents", keyToFile(key))
-          } else {
-            val listeners = WatchKeyManager.listeners(key)
-            val baseListeners = WatchKeyManager.baseListeners(key)
-            val baseFileListeners = WatchKeyManager.baseFileListeners(key)
-            listeners foreach { _.baseRemoved() }
-            baseFileListeners foreach { o => o.fileDeleted(o.base) }
-            WatchKeyManager.removeKey(key)
-            //log.debug(s"watch recovered directory ${keyToFile(key)}")
-            watch(key, listeners, true)
-          }
-        } else if (WatchKeyManager.hasSubDir(key)) {
-          WatchKeyManager.keyFromFile(key.getParentFile) match {
-            case Some(p) => if (!p.reset) {
-              log.debug(s"may be recover parent ${keyToFile(p)}")
-              maybeRecoverFromDeletion(p, 3)
+        if (deletedDirShouldHaveInvalidKey(key)) {
+          if (WatchKeyManager.hasBase(key)
+            || WatchKeyManager.hasBaseFile(key)
+            || WatchKeyManager.hasProxy(key)) {
+            log.debug("recover from deletion {}", keyToFile(key))
+            if (!key.mkdirs && !key.exists) {
+              if (retry <= 3) {
+                Thread.sleep(20)
+                log.error("retry re-create {} with parents", keyToFile(key))
+                maybeRecoverFromDeletion(key, retry + 1)
+              }
+              log.error("Unable to re-create {} with parents", keyToFile(key))
             } else {
-              if (key.exists) {
-                log.debug(s"key is valide and dir exists ${keyToFile(p)}")
+              val listeners = WatchKeyManager.listeners(key)
+              val baseListeners = WatchKeyManager.baseListeners(key)
+              val baseFileListeners = WatchKeyManager.baseFileListeners(key)
+              listeners foreach { _.baseRemoved() }
+              baseFileListeners foreach { o => o.fileDeleted(o.base) }
+              WatchKeyManager.removeKey(key)
+              //log.debug(s"watch recovered directory ${keyToFile(key)}")
+              watch(key, listeners, true)
+            }
+          } else if (WatchKeyManager.hasSubDir(key)) {
+            WatchKeyManager.keyFromFile(key.getParentFile) match {
+              case Some(p) => maybeRecoverFromDeletion(p)
+              //  if (!p.reset) {
+              //   log.debug(s"may be recover parent ${keyToFile(p)}")
+              //   maybeRecoverFromDeletion(p, 3)
+              // } else {
+              //   if (key.exists) {
+              //     log.debug(s"key is valid and dir exists ${keyToFile(p)}")
+              //   } else {
+              //     // as seen on Windows
+              //     log.debug(s"key is valid but dir doesn't exist ${keyToFile(p)}")
+              //     if (retry <= 10) {
+              //       Thread.sleep(50)
+              //       log.debug(s"retry to recover from deletion ${retry} ${keyToFile(p)}")
+              //       maybeRecoverFromDeletion(p, retry + 1)
+              //     }
+              //   }
+              // }
+              case None => log.warn(s"can not find a parent key")
+            }
+          }
+        }
+        def deletedDirShouldHaveInvalidKey(k: WatchKey, retry: Int = 0): Boolean = {
+          (k.exists, k.reset) match {
+            case (true, _) => false
+            case (false, true) => {
+              if (retry <= 10) {
+                Thread.sleep(50)
+                log.debug(s"deleted dir still has a valid key ${keyToFile(k)}. Waiting")
+                deletedDirShouldHaveInvalidKey(k, retry + 1)
               } else {
-                log.debug(s"key is valid but dir doesn't exist ${keyToFile(p)}")
-
-                if (retry <= 10) {
-                  Thread.sleep(50)
-                  log.debug(s"retry ${retry} ${keyToFile(p)}")
-                  maybeRecoverFromDeletion(p, retry + 1)
-                }
-
+                log.error(s"deleted dir has a valid key ${keyToFile(k)}.")
+                false
               }
             }
-
-            case None => log.warn(s"can not find a parent key")
+            case (false, false) => true
           }
         }
       }
