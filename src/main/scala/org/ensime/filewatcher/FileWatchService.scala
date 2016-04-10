@@ -20,6 +20,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.implicitConversions
 import scala.util.{ Failure, Success, Try }
 import scala.util.control.Breaks._
+import scala.util.Properties
 
 import org.slf4j.{ Logger, LoggerFactory }
 
@@ -141,7 +142,7 @@ class FileWatchService {
         )
       } catch {
         case e: Throwable => {
-          if (retry > 0) {
+          if (retry < 0) {
             log.warn("can not register. retrying..." + dir + " " + e)
             Thread.sleep(50)
             watch(dir, listeners, wasMissing, retry - 1)
@@ -256,11 +257,15 @@ class FileWatchService {
       }
 
       def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
-        if (deletedDirShouldHaveInvalidKey(key)) {
+        log.debug(s"maybeRecoverFromDeletion ${keyToFile(key)} ${retry}")
+        //log.debug(s"OS: ${scala.util.Properties.osName}")
+        val isWindows = Properties.osName.startsWith("Windows")
+        if ((!isWindows && (!key.reset())) || (isWindows && deletedDirShouldHaveInvalidKey(key))) {
           if (WatchKeyManager.hasBase(key)
             || WatchKeyManager.hasBaseFile(key)
             || WatchKeyManager.hasProxy(key)) {
             log.debug("recover from deletion {}", keyToFile(key))
+
             if (!key.mkdirs && !key.exists) {
               if (retry <= 3) {
                 Thread.sleep(20)
@@ -281,40 +286,60 @@ class FileWatchService {
           } else if (WatchKeyManager.hasSubDir(key)) {
             WatchKeyManager.keyFromFile(key.getParentFile) match {
               case Some(p) => maybeRecoverFromDeletion(p)
-              //  if (!p.reset) {
-              //   log.debug(s"may be recover parent ${keyToFile(p)}")
-              //   maybeRecoverFromDeletion(p, 3)
-              // } else {
-              //   if (key.exists) {
-              //     log.debug(s"key is valid and dir exists ${keyToFile(p)}")
-              //   } else {
-              //     // as seen on Windows
-              //     log.debug(s"key is valid but dir doesn't exist ${keyToFile(p)}")
-              //     if (retry <= 10) {
-              //       Thread.sleep(50)
-              //       log.debug(s"retry to recover from deletion ${retry} ${keyToFile(p)}")
-              //       maybeRecoverFromDeletion(p, retry + 1)
-              //     }
-              //   }
-              // }
               case None => log.warn(s"can not find a parent key")
             }
           }
+        } else {
+          log.debug(s"directory exists ${keyToFile(key)}")
         }
+
         def deletedDirShouldHaveInvalidKey(k: WatchKey, retry: Int = 0): Boolean = {
           (k.exists, k.reset) match {
-            case (true, _) => false
-            case (false, true) => {
-              if (retry <= 10) {
-                Thread.sleep(50)
-                log.debug(s"deleted dir still has a valid key ${keyToFile(k)}. Waiting")
+            case (true, true) => {
+              log.debug(s"on windows we are not sure that it is exists ${keyToFile(key)}")
+              if (retry < 10) {
+                Thread.sleep(2)
+                log.debug(s"existing dir has an VALID key but we retry anyway ${keyToFile(k)}")
                 deletedDirShouldHaveInvalidKey(k, retry + 1)
               } else {
-                log.error(s"deleted dir has a valid key ${keyToFile(k)}.")
+                log.debug(s"existing dir still has an VALID key ${keyToFile(k)}")
+                false
+              }
+
+              //false
+            }
+            case (true, false) => {
+              log.debug(s"key is invalid but dir exists ${keyToFile(key)}")
+              if (retry < 10) {
+                Thread.sleep(50)
+                log.debug(s"existing dir has an invalid key ${keyToFile(k)}")
+                deletedDirShouldHaveInvalidKey(k, retry + 1)
+              } else {
+                log.debug(s"existing dir still has an invalid key ${keyToFile(k)}")
                 false
               }
             }
-            case (false, false) => true
+            case (false, true) => {
+              if (retry < 10) {
+                Thread.sleep(50)
+                log.debug(s"deleted dir has a valid key ${keyToFile(k)}. Waiting")
+                deletedDirShouldHaveInvalidKey(k, retry + 1)
+              } else {
+                log.error(s"deleted dir still has a valid key ${keyToFile(k)}.")
+                /*
+                if (retry > 10) {
+                  Thread.sleep(50)
+                  deletedDirShouldHaveInvalidKey(k, retry + 1)
+                }
+                log.error(s"deleted dir still have a valid key ${keyToFile(k)}.")
+                 */
+                false
+              }
+            }
+            case (false, false) => {
+              log.debug(s"ok, deleted key has a invalid key ${keyToFile(k)}")
+              true
+            }
           }
         }
       }

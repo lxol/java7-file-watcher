@@ -607,6 +607,8 @@ abstract class FileWatcherSpec extends EnsimeSpec
     tk.system.scheduler.scheduleOnce(50 milli) {
       log.debug(s"remove ${base}")
       root.tree.reverse.foreach(_.delete())
+      //root.exists should be false
+      //base.exist hsould be false
     }
     val fishBaseRemovedAndCreated: Fish = {
       case BaseRemoved(f) => {
