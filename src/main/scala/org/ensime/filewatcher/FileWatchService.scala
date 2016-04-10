@@ -195,10 +195,10 @@ class FileWatchService {
             // Windows can not survive removal of parent base directory
             // without delay
 
-            if (!key.reset || !(keyToFile(key).exists)) {
+            if (!key.reset) {
               log.debug("may be recover from deletion", keyToFile(key))
               maybeRecoverFromDeletion(key)
-              Thread.sleep(50)
+              //Thread.sleep(50)
             }
           }
           case Failure(e) => {
@@ -261,7 +261,7 @@ class FileWatchService {
 
       def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
         if (WatchKeyManager.hasBase(key)
-          || WatchKeyManager.hasBaseFile(key)
+          //|| WatchKeyManager.hasBaseFile(key)
           || WatchKeyManager.hasProxy(key)) {
           log.debug("recover from deletion {}", keyToFile(key))
           if (!key.mkdirs && !key.exists) {
@@ -281,9 +281,16 @@ class FileWatchService {
             //log.debug(s"watch recovered directory ${keyToFile(key)}")
             watch(key, listeners, true)
           }
+        } else if (WatchKeyManager.hasSubDir(key)) {
+          WatchKeyManager.keyFromFile(key.getParentFile) match {
+            case Some(p) => if (!p.reset) {
+              log.debug(s"may be recover parent ${keyToFile(p)}")
+              maybeRecoverFromDeletion(p, 3)
+            }
+            case None => log.warn(s"can not find a parent key")
+          }
         }
       }
-
       def continueMonitoring() = {
         monitorThread match {
           case Some(t) => if (t.isInterrupted) {
@@ -529,6 +536,15 @@ class FileWatchService {
         case None => false
       }
     }
+    def hasSubDir(key: WatchKey) = {
+      keymap.get(key) match {
+        case Some(os) => os.exists {
+          case _: BaseSubdirObserver => true
+          case _ => false
+        }
+        case None => false
+      }
+    }
 
     def hasBaseFile(key: WatchKey) = {
       keymap.get(key) match {
@@ -561,6 +577,9 @@ class FileWatchService {
     }
     def totalKeyNum() = {
       keymap.keys.foldLeft(0) { (a, _) => a + 1 }
+    }
+    def keyFromFile(f: File): Option[WatchKey] = {
+      keymap.keys.find { k => keyToFile(k) == f.getAbsolutePath }
     }
   }
 }
