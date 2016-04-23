@@ -149,6 +149,7 @@ class FileWatchService {
         }
       }
       //log.debug(s"add ${observers.size} observers to ${dir} ")
+      notifyExisting(dir, listeners, key)
       observers foreach { WatchKeyManager.addObserver(key, _) }
       observers foreach {
         case o: BaseObserver =>
@@ -164,8 +165,6 @@ class FileWatchService {
         case o: BaseSubdirObserver => o.watcherListener.baseSubdirRegistered(dir)
         case o: ProxyObserver => o.watcherListener.proxyRegistered(dir)
       }
-
-      notifyExisting(dir, listeners, key)
 
       if (WatchKeyManager.hasProxy(key)) {
         dir.listFiles.filter(f => (f.isDirectory || f.isFile))
@@ -190,17 +189,21 @@ class FileWatchService {
         if (!continueMonitoring) break
         Try { watchService.take() } match {
           case Success(key) => {
-            processEvents(key)
-            val isWindows = Properties.osName.startsWith("Windows")
-            if (isWindows) {
-              // can not recover reliably from deleted base without delay
-              Thread.sleep(1000)
+            if (WatchKeyManager.contains(key)) {
+              processEvents(key)
+              val isWindows = Properties.osName.startsWith("Windows")
+              if (isWindows) {
+                // can not recover reliably from deleted base without delay
+                Thread.sleep(1000)
+              } else {
+                Thread.sleep(20)
+              }
+              if (!key.reset) {
+                log.debug("may be recover from deletion {}", keyToFile(key))
+                maybeRecoverFromDeletion(key)
+              }
             } else {
-              Thread.sleep(20)
-            }
-            if (!key.reset) {
-              log.debug("may be recover from deletion {}", keyToFile(key))
-              maybeRecoverFromDeletion(key)
+              log.debug(s"key {} is not managed by watcher yet", keyToFile(key))
             }
           }
           case Failure(e) => {
@@ -389,6 +392,10 @@ class FileWatchService {
 
   object WatchKeyManager {
     val keymap: Map[WatchKey, Set[WatchKeyObserver]] = new ConcurrentHashMap().asScala
+
+    def contains(key: WatchKey) = {
+      keymap.contains(key)
+    }
 
     @tailrec
     def addObserver(key: WatchKey, o: WatchKeyObserver): Unit = {
