@@ -260,16 +260,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
-          checkBase(jar, tk)
-
-          val fishForExistingJar: Fish = {
-            case ExistingFile(b, f) => {
-              b == jar && f == jar
-            }
-            case e => { logEvent("Bad ", dir, e); false }
+          tk.ignoreMsg {
+            case msg: ExistingFile => true
           }
-
-          tk.fishForMessage(maxWait)(fishForExistingJar)
+          checkBase(jar, tk)
 
           tk.system.scheduler.scheduleOnce(1000 milli) {
             jar.writeString("binks")
@@ -297,15 +291,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
-          checkBase(jar, tk)
-          val fishForExistingJar: Fish = {
-            case ExistingFile(b, f) => {
-              b == jar && f == jar
-            }
-            case e => { logEvent("Bad ", dir, e); false }
+          tk.ignoreMsg {
+            case msg: ExistingFile => true
           }
-
-          tk.fishForMessage(maxWait)(fishForExistingJar)
+          checkBase(jar, tk)
 
           tk.system.scheduler.scheduleOnce(30 milli) {
             jar.delete()
@@ -326,7 +315,7 @@ abstract class FileWatcherSpec extends EnsimeSpec
         val jar = (dir / "jar.jar")
         log.debug(s"be able to start up from a non-existent base file. ${jar}")
         withJarWatcher(jar) { watcher =>
-          //Thread.sleep(100)
+
           val proxyRegistered: Fish = {
             case ProxyRegistered(b, f) => {
               log.debug(s"Detected ProxyRegistered ${b} ${f}, ${jar} jar")
@@ -358,15 +347,10 @@ abstract class FileWatcherSpec extends EnsimeSpec
         jar.createWithParents() shouldBe true
 
         withJarWatcher(jar) { watcher =>
-          checkBase(jar, tk)
-
-          val fishForExistingJar: Fish = {
-            case ExistingFile(b, f) => {
-              b == jar && f == jar
-            }
-            case e => { logEvent("Bad ", dir, e); false }
+          tk.ignoreMsg {
+            case msg: ExistingFile => true
           }
-          tk.fishForMessage(maxWait)(fishForExistingJar)
+          checkBase(jar, tk)
 
           jar.delete() shouldBe true
 
@@ -403,14 +387,11 @@ abstract class FileWatcherSpec extends EnsimeSpec
         val jar = (root / "parent" / "jar.jar")
         jar.createWithParents() shouldBe true
         withJarWatcher(jar) { watcher =>
-          checkBase(jar, tk)
-          val fishForExistingJar: Fish = {
-            case ExistingFile(b, f) => {
-              b == jar && f == jar
-            }
-            case e => { logEvent("Bad ", dir, e); false }
+          tk.ignoreMsg {
+            case msg: ExistingFile => true
           }
-          tk.fishForMessage(maxWait)(fishForExistingJar)
+
+          checkBase(jar, tk)
 
           root.tree.reverse.foreach(_.delete())
 

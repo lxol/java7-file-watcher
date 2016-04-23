@@ -9,6 +9,7 @@ import java.nio.file.WatchEvent.Kind
 import java.nio.file.WatchService
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.{ Timer, TimerTask }
 
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
@@ -77,28 +78,35 @@ class FileWatchService {
   }
 
   def watch(file: File, listeners: Set[WatcherListener], wasMissing: Boolean, retry: Int = 2): Unit = {
-    try {
-      if (file.isDirectory) {
-        //log.debug(s"watch a directory ${file}")
-        registerDir(file, listeners, wasMissing, retry)
-      } else if (file.isFile) {
-        //log.debug(s"watch a file ${file}")
-        val fileBase = new File(file.getParent)
-        registerDir(fileBase, listeners, wasMissing, retry)
-      } else {
-        if (file.getParentFile.exists) {
-          //log.debug(s"watch an existing parent path ${file.getParentFile}")
-          registerDir(file.getParentFile, listeners, wasMissing, retry)
-        } else {
-          //log.debug(s"watch a non-existent parent path ${file.getParentFile}")
-          watch(file.getParentFile, listeners, wasMissing, retry)
+    new java.util.Timer().schedule(
+      new java.util.TimerTask() {
+        @Override
+        def run() = {
+          try {
+            if (file.isDirectory) {
+              //log.debug(s"watch a directory ${file}")
+              registerDir(file, listeners, wasMissing, retry)
+            } else if (file.isFile) {
+              //log.debug(s"watch a file ${file}")
+              val fileBase = new File(file.getParent)
+              registerDir(fileBase, listeners, wasMissing, retry)
+            } else {
+              if (file.getParentFile.exists) {
+                //log.debug(s"watch an existing parent path ${file.getParentFile}")
+                registerDir(file.getParentFile, listeners, wasMissing, retry)
+              } else {
+                //log.debug(s"watch a non-existent parent path ${file.getParentFile}")
+                watch(file.getParentFile, listeners, wasMissing, retry)
+              }
+            }
+          } catch {
+            case e: Throwable =>
+              log.error(s"failed to watch ${file}")
+          }
         }
-      }
-    } catch {
-      case e: Throwable =>
-        log.error(s"failed to watch ${file}")
-    }
-
+      },
+      500
+    );
   }
 
   def notifyExisting(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
@@ -149,6 +157,7 @@ class FileWatchService {
         }
       }
       //log.debug(s"add ${observers.size} observers to ${dir} ")
+      notifyExisting(dir, listeners, key)
       observers foreach { WatchKeyManager.addObserver(key, _) }
       observers foreach {
         case o: BaseObserver =>
@@ -164,8 +173,6 @@ class FileWatchService {
         case o: BaseSubdirObserver => o.watcherListener.baseSubdirRegistered(dir)
         case o: ProxyObserver => o.watcherListener.proxyRegistered(dir)
       }
-
-      notifyExisting(dir, listeners, key)
 
       if (WatchKeyManager.hasProxy(key)) {
         dir.listFiles.filter(f => (f.isDirectory || f.isFile))
@@ -190,17 +197,21 @@ class FileWatchService {
         if (!continueMonitoring) break
         Try { watchService.take() } match {
           case Success(key) => {
-            processEvents(key)
-            val isWindows = Properties.osName.startsWith("Windows")
-            if (isWindows) {
-              // can not recover reliably from deleted base without delay
-              Thread.sleep(1000)
+            if (WatchKeyManager.contains(key)) {
+              processEvents(key)
+              val isWindows = Properties.osName.startsWith("Windows")
+              if (isWindows) {
+                // can not recover reliably from deleted base without delay
+                Thread.sleep(1000)
+              } else {
+                Thread.sleep(20)
+              }
+              if (!key.reset) {
+                log.debug("may be recover from deletion {}", keyToFile(key))
+                maybeRecoverFromDeletion(key)
+              }
             } else {
-              Thread.sleep(20)
-            }
-            if (!key.reset) {
-              log.debug("may be recover from deletion {}", keyToFile(key))
-              maybeRecoverFromDeletion(key)
+              log.debug(s"key {} is not managed by watcher yet", keyToFile(key))
             }
           }
           case Failure(e) => {
@@ -389,6 +400,10 @@ class FileWatchService {
 
   object WatchKeyManager {
     val keymap: Map[WatchKey, Set[WatchKeyObserver]] = new ConcurrentHashMap().asScala
+
+    def contains(key: WatchKey) = {
+      keymap.contains(key)
+    }
 
     @tailrec
     def addObserver(key: WatchKey, o: WatchKeyObserver): Unit = {
