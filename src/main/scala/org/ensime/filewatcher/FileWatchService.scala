@@ -122,6 +122,10 @@ class FileWatchService {
   }
 
   def registerDir(dir: File, listeners: Set[WatcherListener], wasMissing: Boolean, retry: Int = 2): Unit = {
+    if (listeners.exists { l => l.base == dir }) {
+      log.debug(s"delay ${dir} base registration")
+      Thread.sleep(100)
+    }
     val observers = (listeners map { maybeBuildWatchKeyObserver(dir, _) }).flatten
     log.debug(s"register ${dir} with WatchService")
     if (!observers.isEmpty) {
