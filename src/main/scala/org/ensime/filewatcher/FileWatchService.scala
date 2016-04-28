@@ -106,14 +106,14 @@ class FileWatchService {
       }
   }
 
-  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
-    if (WatchKeyManager.hasRecursive(key)) {
+  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener]) = {
+    if (listeners.exists { l => l.recursive }) {
       dir.listFiles.filter(_.isDirectory())
         .foreach { file =>
           {
             watch(
               file,
-              WatchKeyManager.recListeners(key),
+              listeners,
               false
             )
           }
@@ -122,6 +122,10 @@ class FileWatchService {
   }
 
   def registerDir(dir: File, listeners: Set[WatcherListener], wasMissing: Boolean, retry: Int = 2): Unit = {
+    if (listeners.exists { l => l.base == dir }) {
+      log.debug(s"delay ${dir} base registration")
+      Thread.sleep(100)
+    }
     val observers = (listeners map { maybeBuildWatchKeyObserver(dir, _) }).flatten
     log.debug(s"register ${dir} with WatchService")
     if (!observers.isEmpty) {
@@ -150,7 +154,7 @@ class FileWatchService {
         case _: BaseFileObserver => true
         case _ => false
       }) {
-        watchExistingSubdirs(dir, listeners, key)
+        watchExistingSubdirs(dir, listeners)
       }
       observers foreach {
         case o: BaseObserver => {
