@@ -106,14 +106,14 @@ class FileWatchService {
       }
   }
 
-  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
-    if (WatchKeyManager.hasRecursive(key)) {
+  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener]) = {
+    if (listeners.exists { l => l.recursive }) {
       dir.listFiles.filter(_.isDirectory())
         .foreach { file =>
           {
             watch(
               file,
-              WatchKeyManager.recListeners(key),
+              listeners,
               false
             )
           }
@@ -150,7 +150,7 @@ class FileWatchService {
         case _: BaseFileObserver => true
         case _ => false
       }) {
-        watchExistingSubdirs(dir, listeners, key)
+        watchExistingSubdirs(dir, listeners)
       }
       observers foreach {
         case o: BaseObserver => {
