@@ -18,7 +18,6 @@ import scala.collection.immutable.Set
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.implicitConversions
 import scala.util.{ Properties, Failure, Success, Try }
-import scala.util.control.Breaks._
 
 import org.slf4j.{ Logger, LoggerFactory }
 
@@ -61,15 +60,13 @@ class FileWatchService {
   private def start() = {
     log.debug("start a background monitoring thread")
     monitorThread match {
-      case Some(t) => t.start()
+      case Some(t) => log.warn(s"monitoring thread is already started")
       case None => {
         monitorThread =
           Some(
-            new Thread {
-              override def run() = {
-                monitor()
-              }
-            }
+            new Thread(new Runnable {
+              override def run(): Unit = monitor()
+            })
           )
         monitorThread.get.start()
       }
@@ -97,29 +94,21 @@ class FileWatchService {
 
   }
 
-  def notifyExisting(dir: File, listeners: Set[WatcherListener], key: WatchKey) = {
-    dir.listFiles.filter(_.isFile)
-      .foreach { file =>
-        {
-          listeners filter { _.isWatched(file) } foreach { _.existingFile(file) }
-        }
-      }
-  }
+  def notifyExisting(dir: File, listeners: Set[WatcherListener], key: WatchKey) =
+    for {
+      f <- dir.listFiles
+      if f.isFile
+      l <- listeners
+      if l.isWatched(f)
+    } { l.existingFile(f) }
 
-  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener]) = {
-    if (listeners.exists { l => l.recursive }) {
-      dir.listFiles.filter(_.isDirectory())
-        .foreach { file =>
-          {
-            watch(
-              file,
-              listeners,
-              false
-            )
-          }
-        }
-    }
-  }
+  def watchExistingSubdirs(dir: File, listeners: Set[WatcherListener]) =
+    if (listeners.exists(_.recursive))
+      for {
+        d <- dir.listFiles
+        if d.isDirectory
+        l <- listeners
+      } { watch(d, listeners, false) }
 
   def registerDir(dir: File, listeners: Set[WatcherListener], wasMissing: Boolean, retry: Int = 2): Unit = {
     if (listeners.exists { l => l.base == dir }) {
@@ -153,37 +142,33 @@ class FileWatchService {
         case _: BaseSubdirObserver => true
         case _: BaseFileObserver => true
         case _ => false
-      }) {
+      })
         watchExistingSubdirs(dir, listeners)
-      }
+
       observers foreach {
-        case o: BaseObserver => {
+        case o: BaseObserver =>
           if (wasMissing)
             o.watcherListener.missingBaseRegistered()
           else
             o.watcherListener.baseRegistered()
-        }
         case o: BaseFileObserver =>
           if (wasMissing)
             o.watcherListener.missingBaseRegistered()
           else
             o.watcherListener.baseRegistered()
-        case o: BaseSubdirObserver => {
+        case o: BaseSubdirObserver =>
           o.watcherListener.baseSubdirRegistered(dir)
-        }
+
         case o: ProxyObserver => o.watcherListener.proxyRegistered(dir)
       }
-      observers foreach { WatchKeyManager.addObserver(key, _) }
-      if (WatchKeyManager.hasProxy(key)) {
-        dir.listFiles.filter(f => (f.isDirectory || f.isFile))
-          .foreach {
-            WatchKeyManager.maybeAdvanceProxy(key, _)
-          }
-      }
 
-    } else {
+      observers foreach (WatchKeyManager.addObserver(key, _))
+      if (WatchKeyManager.hasProxy(key))
+        dir.listFiles.filter(f => (f.isDirectory || f.isFile))
+          .foreach(WatchKeyManager.maybeAdvanceProxy(key, _))
+
+    } else
       log.warn("No listeners for {}. Skip registration.")
-    }
   }
 
   /**
@@ -191,138 +176,116 @@ class FileWatchService {
    */
   private def monitor() = {
     log.debug("start monitoring WatchService events")
-    breakable {
-      while (true) {
-        if (!continueMonitoring) break
-        Try { watchService.take() } match {
-          case Success(key) => {
-            if (WatchKeyManager.contains(key)) {
-              processEvents(key)
-              val isWindows = Properties.osName.startsWith("Windows")
-              if (isWindows) {
-                // can not recover reliably from deleted base without delay
-                Thread.sleep(1000)
-              } else {
-                Thread.sleep(20)
-              }
-              if (!key.reset) {
-                log.debug("may be recover from deletion {}", keyToFile(key))
-                maybeRecoverFromDeletion(key)
-              }
-            } else {
-              log.debug(s"key {} is not managed by watcher yet", keyToFile(key))
+    while (continueMonitoring) {
+      Try { watchService.take() } match {
+        case Success(key) => {
+          if (WatchKeyManager.contains(key)) {
+            processEvents(key)
+            val isWindows = Properties.osName.startsWith("Windows")
+            // can not recover reliably from deleted base without delay
+            if (isWindows) Thread.sleep(1000)
+            else Thread.sleep(20)
+            if (!key.reset) {
+              log.debug("may be recover from deletion {}", keyToFile(key))
+              maybeRecoverFromDeletion(key)
             }
-          }
-          case Failure(e) => {
-            log.error("unexpected WatchService take error. {}", e)
-            break
-          }
+          } else
+            log.debug(s"key {} is not managed by watcher yet", keyToFile(key))
         }
-      }
-      closeWatchService()
-
-      def processEvents(key: WatchKey) = {
-
-        for (event <- key.pollEvents) {
-          val kind = event.kind
-          val file = key.watchable.asInstanceOf[Path]
-            .resolve(event.context.asInstanceOf[Path]).toFile
-          if (kind == ENTRY_CREATE
-            && file.isDirectory
-            && WatchKeyManager.hasRecursive(key)) {
-            watch(
-              file,
-              WatchKeyManager.recListeners(key),
-              false
-            )
-          }
-
-          if (kind == ENTRY_CREATE) {
-            WatchKeyManager.maybeAdvanceProxy(key, file)
-          }
-
-          val ls = WatchKeyManager.nonProxyListeners(key)
-          if (kind == ENTRY_CREATE) {
-            ls filter { _.isWatched(file) } foreach { _.fileCreated(file) }
-          }
-          if (kind == ENTRY_MODIFY) {
-            ls filter { _.isWatched(file) } foreach { _.fileModified(file) }
-          }
-          if (kind == ENTRY_DELETE) {
-            ls filter { _.isWatched(file) } foreach { _.fileDeleted(file) }
-
-            WatchKeyManager.baseFileObservers(key) filter { _.watcherListener.isWatched(file) } foreach
-              { o: WatchKeyObserver =>
-                {
-                  WatchKeyManager.removeObserver(key, o)
-                  o.watcherListener.baseRemoved()
-                  watch(file, Set(o.watcherListener), true)
-                }
-              }
-
-          }
-          if (kind == OVERFLOW) {
-            log.warn(s"overflow event for ${file}")
-          }
-
+        case Failure(e) => {
+          log.error("unexpected WatchService take error. {}", e)
+          shouldRun = false
         }
-      }
-
-      def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
-        if (WatchKeyManager.hasBase(key)
-          || WatchKeyManager.hasBaseFile(key)
-          || WatchKeyManager.hasProxy(key)) {
-          log.debug("recover from deletion {}", keyToFile(key))
-
-          if (!key.mkdirs && !key.exists) {
-            if (retry <= 3) {
-              Thread.sleep(20)
-              log.error("retry re-create {} with parents", keyToFile(key))
-              maybeRecoverFromDeletion(key, retry + 1)
-            }
-            log.error("Unable to re-create {} with parents", keyToFile(key))
-          } else {
-            val listeners = WatchKeyManager.listeners(key)
-            val baseListeners = WatchKeyManager.baseListeners(key)
-            val baseFileListeners = WatchKeyManager.baseFileListeners(key)
-            listeners foreach { _.baseRemoved() }
-            baseFileListeners foreach { o => o.fileDeleted(o.base) }
-            WatchKeyManager.removeKey(key)
-            watch(key, listeners, true)
-          }
-        } else if (WatchKeyManager.hasSubDir(key)) {
-          WatchKeyManager.keyFromFile(key.getParentFile) match {
-            case Some(p) => maybeRecoverFromDeletion(p)
-            case None => log.warn(s"can not find a parent key")
-          }
-        }
-      }
-
-      def continueMonitoring() = {
-        monitorThread match {
-          case Some(t) => if (t.isInterrupted) {
-            log.info("monitoring thread was interrupted")
-            false
-          }
-          case None => {
-            log.info("monitoring should run in a background thread")
-            false
-          }
-        }
-        if (!shouldRun) {
-          log.info("request to stop monitoring")
-          false
-        }
-        true
       }
     }
+    closeWatchService()
+
+    def processEvents(key: WatchKey) = {
+
+      for (event <- key.pollEvents) {
+        val kind = event.kind
+        val file = key.watchable.asInstanceOf[Path]
+          .resolve(event.context.asInstanceOf[Path]).toFile
+
+        if (kind == ENTRY_CREATE
+          && file.isDirectory
+          && WatchKeyManager.hasRecursive(key))
+          watch(file, WatchKeyManager.recListeners(key), false)
+
+        if (kind == ENTRY_CREATE)
+          WatchKeyManager.maybeAdvanceProxy(key, file)
+
+        val ls = WatchKeyManager.nonProxyListeners(key)
+
+        if (kind == ENTRY_CREATE)
+          ls filter { _.isWatched(file) } foreach (_.fileCreated(file))
+
+        if (kind == ENTRY_MODIFY)
+          ls filter { _.isWatched(file) } foreach (_.fileModified(file))
+
+        if (kind == ENTRY_DELETE) {
+          ls filter { _.isWatched(file) } foreach (_.fileDeleted(file))
+          for {
+            o <- WatchKeyManager.baseFileObservers(key)
+            if o.watcherListener.isWatched(file)
+          } {
+            WatchKeyManager.removeObserver(key, o)
+            o.watcherListener.baseRemoved()
+            watch(file, Set(o.watcherListener), true)
+          }
+        }
+        if (kind == OVERFLOW)
+          log.warn(s"overflow event for ${file}")
+      }
+    }
+
+    def maybeRecoverFromDeletion(key: WatchKey, retry: Int = 0): Unit = {
+      if (WatchKeyManager.hasBase(key)
+        || WatchKeyManager.hasBaseFile(key)
+        || WatchKeyManager.hasProxy(key)) {
+        log.debug("recover from deletion {}", keyToFile(key))
+
+        if (!key.mkdirs && !key.exists) {
+          if (retry <= 3) {
+            Thread.sleep(20)
+            log.error("retry re-create {} with parents", keyToFile(key))
+            maybeRecoverFromDeletion(key, retry + 1)
+          }
+          log.error("Unable to re-create {} with parents", keyToFile(key))
+        } else {
+          val listeners = WatchKeyManager.listeners(key)
+          val baseListeners = WatchKeyManager.baseListeners(key)
+          val baseFileListeners = WatchKeyManager.baseFileListeners(key)
+          listeners foreach (_.baseRemoved())
+          baseFileListeners foreach (o => o.fileDeleted(o.base))
+          WatchKeyManager.removeKey(key)
+          watch(key, listeners, true)
+        }
+      } else if (WatchKeyManager.hasSubDir(key)) {
+        WatchKeyManager.keyFromFile(key.getParentFile) match {
+          case Some(p) => maybeRecoverFromDeletion(p)
+          case None => log.warn(s"can not find a parent key")
+        }
+      }
+    }
+
+    def continueMonitoring() =
+      (monitorThread match {
+        case Some(t) => if (t.isInterrupted) {
+          log.info("monitoring thread was interrupted")
+          false
+        } else true
+        case None => {
+          log.info("monitoring should run in a background thread")
+          false
+        }
+      }) && shouldRun
   }
 
   def closeWatchService() = {
     try {
       log.info("close  WatchService")
       shouldRun = false
-      Thread.sleep(50)
       watchService.close();
     } catch {
       case e: Throwable =>
@@ -348,15 +311,15 @@ class FileWatchService {
       log.warn("building a WatchKeyObserver for a non-existent {} doesn't make sense.", f)
       return None
     }
-    if (l.base == f) {
+    if (l.base == f)
       Some(new BaseObserver(l))
-    } else if (l.base.isFile && l.base.getParentFile == f) {
+    else if (l.base.isFile && l.base.getParentFile == f)
       Some(new BaseFileObserver(l))
-    } else if (l.recursive && f.getAbsolutePath.startsWith(l.base.getAbsolutePath)) {
+    else if (l.recursive && f.getAbsolutePath.startsWith(l.base.getAbsolutePath))
       Some(new BaseSubdirObserver(l))
-    } else if (l.base.getAbsolutePath.startsWith(f.getAbsolutePath)) {
+    else if (l.base.getAbsolutePath.startsWith(f.getAbsolutePath))
       Some(new ProxyObserver(l))
-    } else {
+    else {
       log.warn(s"don't know what observer to create dir: ${f} for ${l.base.getAbsolutePath} base")
       None
     }
@@ -415,119 +378,95 @@ class FileWatchService {
           if (newObservers.isEmpty) {
             keymap.remove(key)
             key.cancel()
-          } else {
-            if (!keymap.replace(key, oldObservers, newObservers)) {
-              if (retry > 0) {
-                removeObserver(key, o)
-              } else {
-                log.warn("unable to remove a listener from {}", keyToFile(key))
-              }
-            }
-          }
+          } else if (!keymap.replace(key, oldObservers, newObservers))
+            if (retry > 0)
+              removeObserver(key, o)
+            else
+              log.warn("unable to remove an observer from {}", keyToFile(key))
         }
-        case None => log.warn(s"failed to remove ${o.observerType} from ${keyToFile(key)}")
+        case None => log.warn(s"watcher doesn't monitor ${keyToFile(key)}")
       }
     }
 
-    def maybeAdvanceProxy(key: WatchKey, createdFile: File) = {
-      proxies(key) foreach { o =>
-        if (o.watcherListener.isBaseAncestor(createdFile)) {
+    def maybeAdvanceProxy(key: WatchKey, createdFile: File) =
+      proxies(key) foreach (o =>
+        if (o.watcherListener.isBaseAncestor(createdFile))
           if (createdFile.isDirectory || createdFile.isFile) {
-            removeObserver(key, o)
-            watch(createdFile, Set(o.watcherListener), true)
-          } else {
-            log.warn("unable to advance a proxy {}", o)
-          }
+          removeObserver(key, o)
+          watch(createdFile, Set(o.watcherListener), true)
+        } else
+          log.warn("unable to advance a proxy {}", o))
+
+    def removeObservers(id: UUID) =
+      keymap.keys foreach (
+        key => {
+          val observers = keymap.get(key).getOrElse { Set() }
+          val unneeded = observers filter { _.watcherListener.watcherId == id }
+          val retained = observers filter { _.watcherListener.watcherId != id }
+
+          if (observers.size == 0 || unneeded.size == observers.size) {
+            key.cancel()
+            keymap.remove(key)
+          } else if (observers.size != retained.size)
+            if (!keymap.replace(key, observers, retained))
+              log.error(s"failed to remove ${unneeded.size} listeners from  ${keyToFile(key)}")
         }
-      }
-    }
+      )
 
-    def removeObservers(id: UUID) = {
-      keymap.keys foreach {
-        key =>
-          {
-            val observers = keymap.get(key).getOrElse { Set() }
-            val unneeded = observers filter { _.watcherListener.watcherId == id }
-            val retained = observers filter { _.watcherListener.watcherId != id }
-
-            if (observers.size == 0 || unneeded.size == observers.size) {
-              key.cancel()
-              keymap.remove(key)
-            } else {
-              if (observers.size != retained.size) {
-                if (keymap.replace(key, observers, retained)) {
-                } else
-                  log.error(s"failed to remove ${unneeded.size} listeners from  ${keyToFile(key)}")
-              }
-            }
-          }
-      }
-      // TODO: shutdown watchService if no keys left in directories
-    }
-    def baseFileObservers(key: WatchKey) = {
+    def baseFileObservers(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: BaseFileObserver => true
         case _ => false
       }
-    }
 
-    def recListeners(key: WatchKey) = {
+    def recListeners(key: WatchKey) =
       listeners(key) filter { _.recursive }
-    }
 
-    def baseListeners(key: WatchKey) = {
+    def baseListeners(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: BaseObserver => true
         case _ => false
       } map { _.watcherListener }
-    }
 
-    def baseFileListeners(key: WatchKey) = {
+    def baseFileListeners(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: BaseFileObserver => true
         case _ => false
       } map { _.watcherListener }
-    }
 
-    def proxyListeners(key: WatchKey) = {
+    def proxyListeners(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: ProxyObserver => true
         case _ => false
       } map { _.watcherListener }
-    }
 
-    def nonProxyListeners(key: WatchKey) = {
+    def nonProxyListeners(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: ProxyObserver => false
         case _ => true
       } map { _.watcherListener }
-    }
 
-    def proxies(key: WatchKey) = {
+    def proxies(key: WatchKey) =
       keymap getOrElse (key, Set()) filter {
         case _: ProxyObserver => true
         case _ => false
       }
-    }
 
-    def listeners(key: WatchKey) = {
+    def listeners(key: WatchKey) =
       keymap getOrElse (key, Set()) map { _.watcherListener }
-    }
 
     def removeKey(key: WatchKey): Unit = {
       key.cancel()
       keymap.remove(key)
     }
 
-    def hasRecursive(key: WatchKey) = {
-      keymap.getOrElse(key, Set()) foreach { _.recursive }
+    def hasRecursive(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists { _.recursive }
         case None => false
       }
-    }
 
-    def hasBase(key: WatchKey) = {
+    def hasBase(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists {
           case _: BaseObserver => true
@@ -535,8 +474,8 @@ class FileWatchService {
         }
         case None => false
       }
-    }
-    def hasSubDir(key: WatchKey) = {
+
+    def hasSubDir(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists {
           case _: BaseSubdirObserver => true
@@ -544,9 +483,8 @@ class FileWatchService {
         }
         case None => false
       }
-    }
 
-    def hasBaseFile(key: WatchKey) = {
+    def hasBaseFile(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists {
           case _: BaseFileObserver => true
@@ -554,9 +492,8 @@ class FileWatchService {
         }
         case None => false
       }
-    }
 
-    def hasProxy(key: WatchKey) = {
+    def hasProxy(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists {
           case _: ProxyObserver => true
@@ -564,9 +501,8 @@ class FileWatchService {
         }
         case None => false
       }
-    }
 
-    def hasBaseSubdir(key: WatchKey) = {
+    def hasBaseSubdir(key: WatchKey) =
       keymap.get(key) match {
         case Some(os) => os.exists {
           case _: BaseSubdirObserver => true
@@ -574,24 +510,22 @@ class FileWatchService {
         }
         case None => false
       }
-    }
-    def totalKeyNum() = {
+
+    def totalKeyNum() =
       keymap.keys.foldLeft(0) { (a, _) => a + 1 }
-    }
-    def keyFromFile(f: File): Option[WatchKey] = {
+
+    def keyFromFile(f: File): Option[WatchKey] =
       keymap.keys.find { k => keyToFile(k).getAbsolutePath == f.getAbsolutePath }
-    }
   }
 }
 
 abstract class Watcher(val watcherId: UUID, val file: File, val listeners: Set[WatcherListener]) {
   val fileWatchService: FileWatchService
-  def watch(): Unit = {
+  def watch(): Unit =
     fileWatchService.watch(file, listeners, false)
-  }
-  def shutdown() = {
+
+  def shutdown() =
     fileWatchService.WatchKeyManager.removeObservers(watcherId)
-  }
 }
 
 trait WatcherListener {
@@ -613,14 +547,11 @@ trait WatcherListener {
 
   def existingFile(f: File): Unit = {}
 
-  def isWatched(f: File) = {
+  def isWatched(f: File) =
     (extensions.exists(e => {
       f.getName.endsWith(e)
     })) && f.getPath.startsWith(base.getPath)
-  }
 
-  def isBaseAncestor(f: File) = {
+  def isBaseAncestor(f: File) =
     base.getAbsolutePath.startsWith(f.getAbsolutePath)
-  }
-
 }
