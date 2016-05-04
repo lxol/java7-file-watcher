@@ -112,11 +112,13 @@ class FileWatchService {
 
   def registerDir(dir: File, listeners: Set[WatcherListener], wasMissing: Boolean, retry: Int = 2): Unit = {
     if (listeners.exists { l => l.base == dir }) {
-      log.debug(s"delay ${dir} base registration")
+      if (log.isTraceEnabled)
+        log.trace(s"delay ${dir} base registration")
       Thread.sleep(100)
     }
     val observers = (listeners map { maybeBuildWatchKeyObserver(dir, _) }).flatten
-    log.debug(s"register ${dir} with WatchService")
+    if (log.isTraceEnabled)
+      log.trace(s"register ${dir} with WatchService")
     if (!observers.isEmpty) {
       val key: WatchKey = try {
         dir.toPath.register(
@@ -186,11 +188,12 @@ class FileWatchService {
             if (isWindows) Thread.sleep(1000)
             else Thread.sleep(20)
             if (!key.reset) {
-              log.debug("may be recover from deletion {}", keyToFile(key))
+              if (log.isTraceEnabled)
+                log.trace("may be recover from deletion {}", keyToFile(key))
               maybeRecoverFromDeletion(key)
             }
-          } else
-            log.debug(s"key {} is not managed by watcher yet", keyToFile(key))
+          } else if (log.isTraceEnabled)
+            log.trace(s"key {} is not managed by watcher yet", keyToFile(key))
         }
         case Failure(e) => {
           log.error("unexpected WatchService take error. {}", e)
@@ -243,7 +246,8 @@ class FileWatchService {
       if (WatchKeyManager.hasBase(key)
         || WatchKeyManager.hasBaseFile(key)
         || WatchKeyManager.hasProxy(key)) {
-        log.debug("recover from deletion {}", keyToFile(key))
+        if (log.isTraceEnabled)
+          log.trace("recover from deletion {}", keyToFile(key))
 
         if (!key.mkdirs && !key.exists) {
           if (retry <= 3) {
@@ -298,7 +302,8 @@ class FileWatchService {
   }
 
   def spawnWatcher(uuid: UUID, file: File, listeners: Set[WatcherListener]) = {
-    log.debug(s"spawn ${uuid} watcher for ${file} base")
+    if (log.isTraceEnabled)
+      log.trace(s"spawn ${uuid} watcher for ${file} base")
     val w = new Watcher(uuid, file, listeners) {
       val fileWatchService = self;
     }
